@@ -23,7 +23,7 @@ variables:
 
 test:
   stage: test
-  image: rust:1.70
+  image: rust:latest
   before_script:
     # install protoc if your build.rs needs it
     - apt-get update && apt-get install -y protobuf-compiler curl
