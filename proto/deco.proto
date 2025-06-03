@@ -1,5 +1,5 @@
 edition = "2023";
 
 message CacheEntry {
-    string key = 1;
+    string id = 1;
 }

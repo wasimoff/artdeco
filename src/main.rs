@@ -1,9 +1,12 @@
 use futures::StreamExt;
 use log::{info, trace};
+use protobuf::Message;
 use rabbitmq_stream_client::{
-    error::StreamCreateError, types::{ByteCapacity, Message, OffsetSpecification, ResponseCode}, Consumer, ConsumerHandle, Environment
+    error::StreamCreateError, types::{ByteCapacity, OffsetSpecification, ResponseCode}, Consumer, ConsumerHandle, Environment
 };
 use tokio::task;
+
+include!(concat!(env!("OUT_DIR"), "/protos/mod.rs"));
 
 struct CacheEntry {
     id: String,
@@ -12,15 +15,19 @@ struct CacheEntry {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace"))
+        .format_timestamp_secs()
+        .init();
+
+    info!("Starting application...");
+
     let environment = Environment::builder()
-        .host("rabbitmq")
-        .port(5552)
         .username("user")
         .password("password")
         .build()
         .await?;
 
-    info!("Connected to RabbitMQ Stream");
+    info!("Connected to RabbitMQ Stream API");
 
     let stream = "provider-stream";
     let create_response = environment
@@ -51,9 +58,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Consumer created for stream: {}", stream);
 
     let handle = consumer.handle();
-    task::spawn(async move {
-        handle_provider_message(consumer).await;
-    });
+    handle_provider_message(consumer).await;
 
     Ok(())
 }
@@ -65,6 +70,18 @@ async fn handle_provider_message(mut consumer: Consumer)
         trace!("Got message: {:#?} with offset: {}",
                  d.message().data().map(|data| String::from_utf8(data.to_vec()).unwrap()),
                  d.offset(),);
-        
+        if let Some(data) = d.message().data() {
+            match deco::CacheEntry::parse_from_bytes(data){
+                Ok(cache_entry) => {
+                    trace!("Parsed CacheEntry: id={}", cache_entry.id.unwrap());
+                    // Process the cache entry here
+                }
+                Err(err) => {
+                    log::error!("Failed to parse CacheEntry: {}", err);
+                }
+            }
+        } else {
+            trace!("Message has no data");
+        }
     }
 }
