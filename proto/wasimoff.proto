@@ -1,0 +1,319 @@
+// best practices: https://protobuf.dev/programming-guides/dos-donts/
+edition = "2023";
+
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+package wasimoff.v1;
+option go_package = "wasi.team/proto/v1;wasimoffv1";
+
+// enable the new opaque api: https://protobuf.dev/reference/go/opaque-faq/
+// import "google/protobuf/go_features.proto";
+// option features.(pb.go).api_level = API_OPAQUE;
+
+
+// ---------- "topmost" wrapped message format ---------- //
+
+// Envelope is a generic message wrapper with a sequence counter and message type.
+// The payload can contain a { Request, Response, Event }. When an Error is present
+// on a Response, it indicates that the Request failed badly internally.
+message Envelope {
+
+  // The sequence number is incremented for each message but Request and Event
+  // count independently. Responses must always reuse the Request's sequence
+  // number so they can be routed to the caller correctly.
+  uint64 sequence = 1;
+
+  // The message type indicates the payload contents: { Request, Response, Event }.
+  MessageType type = 2;
+  enum MessageType { UNKNOWN = 0; Request = 1; Response = 2; Event = 3; }
+
+  // The presence of an error string indicates a fatal failure with a request.
+  // Responses should encode specific errors within the payload, if possible.
+  string error = 3;
+
+  // The payload itself. Needs to be (un)packed with `anypb`.
+  // The Any payload can take literally any message and there is no Protobuf-enforced
+  // typing between the MessageType and the payload. Therefore you should make sure
+  // to name the Request and Result pairs absolutely clearly. Avoid using a generic
+  // response message for different requests, even if their fields are identical.
+  google.protobuf.Any payload = 4;
+
+}
+
+
+// ---------- task offloading requests ---------- //
+
+// The task message contains parameters to instantiate a task of a certain format
+// and return the output upon successful execution. The Request and Response herein
+// are the smallest unit of work that should be sent on the wire.
+message Task {
+
+  // Information about this task for identification and tracing.
+  message Metadata {
+    string id = 1; // unique identifier for this task
+    string requester = 2; // who is requesting this task
+    string provider = 3; // which provider executed this task
+  }
+
+  // Quality of Service (QoS) parameters for a given task.
+  message QoS {
+    bool priority = 1;
+    google.protobuf.Timestamp deadline = 2;
+    // TODO
+  }
+
+  // Request to terminate a running task on Provider.
+  message Cancel {
+    string id = 1; // unique identifier of the task
+    string reason = 2; // freeform reason for logging
+  }
+
+
+  //  WebAssembly System Interface (WASI), preview1
+  // ===============================================
+  message Wasip1 {
+
+    // Parameters to instantiate a WebAssembly WASI preview 1 task.
+    message Params {
+      File binary = 1;
+      repeated string args = 2;
+      repeated string envs = 3;
+      bytes stdin = 4;
+      File rootfs = 5;
+      repeated string artifacts = 6;
+    }
+
+    // The result of an execution from a Wasip1.Params message. It should only be
+    // returned if the WebAssembly module was instantiated successfully at all.
+    message Output {
+      int32 status = 1;
+      bytes stdout = 2;
+      bytes stderr = 3;
+      File artifacts = 4;
+    }
+
+    // -------
+
+    // Offload a Wasip1 task.
+    message Request {
+      Metadata info = 1;
+      QoS qos = 2;
+      Params params = 3;
+    }
+
+    // Offload a job (group of Wasip1 tasks).
+    // Tasks will inherit unset values from the parent.
+    message JobRequest {
+      Metadata info = 1;
+      QoS qos = 2;
+      Params parent = 3;
+      repeated Params tasks = 4;
+    }
+
+    // Response for a single Wasip1 task, which can be an Error or OK.
+    message Response {
+      Metadata info = 1;
+      oneof result {
+        string error = 2;
+        Output ok = 3;
+      }
+    }
+
+    // Group result of a Wasip1 Job.
+    message JobResponse {
+      Metadata info = 1;
+      string error = 2;
+      repeated Response tasks = 3;
+    }
+
+  }
+
+
+  //  Pyodide Python scripts
+  // ========================
+  message Pyodide {
+
+    // Parameters to instantiate a Pyodide task.
+    message Params {
+      repeated string packages = 1; // preloaded packages
+      oneof run {
+        string script = 2; // plaintext script
+        bytes pickle = 3;  // serialized [ func, [args], {kwargs} ]
+      }
+      repeated string envs = 4; // environment as ENV=var strings
+      bytes stdin = 5; // buffer for stdin, reading errors if none
+      File rootfs = 6; // zip file to unpack
+      repeated string artifacts = 7; // files to pack and send back afterwards
+    }
+
+    // The result of an execution from a Pyodide.Params message. It should only be
+    // returned if the Pyodide interpreter was started successfully at all.
+    message Output {
+      bytes pickle = 1;
+      bytes stdout = 2;
+      bytes stderr = 3;
+      string version = 4;
+      File artifacts = 5;
+    }
+
+    // -------
+
+    // Offload a Pyodide task.
+    message Request {
+      Metadata info = 1;
+      QoS qos = 2;
+      Params params = 3;
+    }
+
+    // Offload a job (group of Pyodide tasks).
+    // Tasks will inherit unset values from the parent.
+    message JobRequest {
+      Metadata info = 1;
+      QoS qos = 2;
+      Params parent = 3;
+      repeated Params tasks = 4;
+    }
+
+    // Response for a single Pyodide task, which can be an Error or OK.
+    message Response {
+      Metadata info = 1;
+      oneof result {
+        string error = 2;
+        Output ok = 3;
+      }
+    }
+
+    // Group result of a Pyodide Job.
+    message JobResponse {
+      Metadata info = 1;
+      string error = 2;
+      repeated Response tasks = 3;
+    }
+
+  }
+
+}
+
+// The Client service defines RPC interfaces for clients connecting to a Broker.
+service Tasks {
+
+  // offload a WebAssembly WASI preview 1 tasks
+  rpc RunWasip1(Task.Wasip1.Request) returns (Task.Wasip1.Response) {}
+  rpc RunWasip1Job(Task.Wasip1.JobRequest) returns (Task.Wasip1.JobResponse) {}
+
+  // offload a Python task in Pyodide
+  rpc RunPyodide(Task.Pyodide.Request) returns (Task.Pyodide.Response) {}
+  // rpc RunPyodideJob(Task.Pyodide.JobRequest) returns (Task.Pyodide.JobResponse) {}
+
+  // upload a file to the broker
+  rpc Upload(Filesystem.Upload.Request) returns (Filesystem.Upload.Response) {}
+
+}
+
+
+// ---------- filesystem ---------- //
+
+// File is a file reference with optional mime-type. The ref could be a plain
+// filename, a prefixed hash digest or a URL to fetch from. When stored, a hash
+// digest should be computed to have a stable identifier.
+message File {
+  string ref = 1; // filename, encoded digest or URL
+  string media = 2; // media type in MIME notation
+  bytes blob = 3; // the actual file contents
+}
+
+message Filesystem {
+
+  // Listing asks for a listing of all available files on Provider
+  message Listing {
+    message Request {
+      // empty
+    }
+    message Response {
+      repeated string files = 1;
+    }
+  }
+
+  // Probe checks if a certain file exists on Provider
+  message Probe {
+    message Request {
+      string file = 1;
+    }
+    message Response {
+      bool ok = 1;
+    }
+  }
+
+  // Upload pushes a file to the other peer.
+  message Upload {
+    message Request {
+      File upload = 1;
+    }
+    message Response {
+      string ref = 1;
+    }
+  }
+
+  // Download can request a file download from the other peer.
+  message Download {
+    message Request {
+      string file = 1;
+    }
+    message Response {
+      File download = 1;
+      string err = 2;
+    }
+  }
+
+}
+
+// ---------- event messages ---------- //
+
+message Event {
+
+  // GenericMessage is just a generic piece of text for logging
+  message GenericMessage {
+    string message = 1;
+  }
+
+  // ProviderHello is sent once at the beginning to identify the Provider
+  message ProviderHello {
+    string name = 1; // a logging-friendly name of the provider
+    string useragent = 2; // like the navigator.useragent in browser
+  }
+
+  // ProviderResources is information about the available resources in Worker pool
+  message ProviderResources {
+    uint32 concurrency = 1; // maximum possible concurrency (~ number of Workers)
+    uint32 tasks = 2; // currently active tasks
+  }
+
+  // ClusterInfo contains information about all connected Providers
+  message ClusterInfo {
+    uint32 providers = 1; // number of currently connected providers
+  }
+
+  // Throughput contains information about overall cluster throughput
+  message Throughput {
+    float overall = 1; // current overall tasks/s throughput
+    float yours = 2; // your contribution (identified by name)
+  }
+
+  // FileSystemUpdate notifies the Broker about changed files on the Provider.
+  message FileSystemUpdate {
+    repeated string added = 1;
+    repeated string removed = 2;
+  }
+
+}
+
+
+// ---------- identifiers for websocket codecs ---------- //
+
+// Subprotocol is used to identify the concrete encoding on the wire.
+enum Subprotocol {
+  UNKNOWN = 0;
+  wasimoff_provider_v1_protobuf = 1; // binary messages with Protobuf encoding
+  wasimoff_provider_v1_json     = 2; // text messages with JSON encoding
+}

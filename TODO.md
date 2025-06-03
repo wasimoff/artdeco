@@ -2,7 +2,7 @@
 
 ## Client library
 
-- [ ] connect to message broker
+- [x] connect to message broker
 - [ ] subscribe to provider list and update local list
 - [ ] 
 

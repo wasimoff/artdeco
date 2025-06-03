@@ -1,13 +1,17 @@
+use futures::StreamExt;
+use log::{info, trace};
 use rabbitmq_stream_client::{
-    Environment,
-    error::StreamCreateError,
-    types::{ByteCapacity, Message, ResponseCode},
+    error::StreamCreateError, types::{ByteCapacity, Message, OffsetSpecification, ResponseCode}, Consumer, ConsumerHandle, Environment
 };
+use tokio::task;
+
+struct CacheEntry {
+    id: String,
+
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    println!("Connecting to RabbitMQ server");
-
     let environment = Environment::builder()
         .host("rabbitmq")
         .port(5552)
@@ -15,6 +19,8 @@ async fn main() -> anyhow::Result<()> {
         .password("password")
         .build()
         .await?;
+
+    info!("Connected to RabbitMQ Stream");
 
     let stream = "provider-stream";
     let create_response = environment
@@ -35,13 +41,30 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let producer = environment.producer().build(stream).await?;
-    producer
-        .send_with_confirm(Message::builder().body("Hello, World!").build())
-        .await?;
+    let consumer = environment
+        .consumer()
+        .offset(OffsetSpecification::First)
+        .build(stream)
+        .await
+        .unwrap();
 
-    println!("Sent message to stream: {}", stream);
-    producer.close().await?;
+    info!("Consumer created for stream: {}", stream);
+
+    let handle = consumer.handle();
+    task::spawn(async move {
+        handle_provider_message(consumer).await;
+    });
 
     Ok(())
+}
+
+async fn handle_provider_message(mut consumer: Consumer)
+{
+    while let Some(delivery) = consumer.next().await {
+        let d = delivery.unwrap();
+        trace!("Got message: {:#?} with offset: {}",
+                 d.message().data().map(|data| String::from_utf8(data.to_vec()).unwrap()),
+                 d.offset(),);
+        
+    }
 }

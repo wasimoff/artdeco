@@ -8,3 +8,9 @@ rabbitmq-stream-client = "0.4"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 futures = "0.3"
 anyhow = "1"
+log = "0.4"
+protobuf = "3"
+
+[build-dependencies]
+protobuf-codegen = "3"
+protoc-rust = "^2.0"
