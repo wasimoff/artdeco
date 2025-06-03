@@ -1,14 +1,21 @@
 use rabbitmq_stream_client::{
-    Environment, RabbitMQStreamResult,
+    Environment,
     error::StreamCreateError,
-    types::{ByteCapacity, ResponseCode},
+    types::{ByteCapacity, Message, ResponseCode},
 };
 
 #[tokio::main]
-async fn main() -> RabbitMQStreamResult<()> {
+async fn main() -> anyhow::Result<()> {
     println!("Connecting to RabbitMQ server");
 
-    let environment = Environment::builder().host("172.17.0.1").username("user").password("password").build().await?;
+    let environment = Environment::builder()
+        .host("rabbitmq")
+        .port(5552)
+        .username("user")
+        .password("password")
+        .build()
+        .await?;
+
     let stream = "provider-stream";
     let create_response = environment
         .stream_creator()
@@ -27,5 +34,14 @@ async fn main() -> RabbitMQStreamResult<()> {
             }
         }
     }
+
+    let producer = environment.producer().build(stream).await?;
+    producer
+        .send_with_confirm(Message::builder().body("Hello, World!").build())
+        .await?;
+
+    println!("Sent message to stream: {}", stream);
+    producer.close().await?;
+
     Ok(())
 }

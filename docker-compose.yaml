@@ -4,7 +4,7 @@ services:
     container_name: rabbitmq
     # Enable the stream plugins before launching the server
     command: >
-      bash -lc "rabbitmq-plugins enable --offline rabbitmq_stream rabbitmq_stream_management && rabbitmq-server"
+      bash -lc "rabbitmq-plugins enable --offline rabbitmq_stream rabbitmq_stream_management rabbitmq_shovel rabbitmq_shovel_management && rabbitmq-server"
     restart: always
     environment:
       RABBITMQ_DEFAULT_USER: user
@@ -16,6 +16,29 @@ services:
       - "15672:15672"    # Management UI
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # shovel-setup:
+  #   image: curlimages/curl:latest
+  #   depends_on:
+  #     rabbitmq:
+  #     condition: service_healthy
+  #   command: >
+  #     sh -c "
+  #     sleep 10 &&
+  #     curl -u user:password -X PUT http://rabbitmq:15672/api/parameters/shovel/%2f/my-shovel -H 'Content-Type: application/json' -d '{
+  #     \"value\": {
+  #       \"src-uri\": \"amqp://user:password@rabbitmq:5672\",
+  #       \"src-queue\": \"source-queue\",
+  #       \"dest-uri\": \"amqp://user:password@rabbitmq:5672\",
+  #       \"dest-queue\": \"destination-queue\"
+  #     }
+  #     }'
+  #     "
 
 volumes:
   rabbitmq_data:

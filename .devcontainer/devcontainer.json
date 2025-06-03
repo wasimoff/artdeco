@@ -3,7 +3,7 @@
 {
 	"name": "Debian",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "mcr.microsoft.com/devcontainers/base:bullseye",
+	//"image": "mcr.microsoft.com/devcontainers/base:bullseye",
 	"features": {
 		"ghcr.io/devcontainers/features/rust:1": {},
 		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
@@ -15,8 +15,13 @@
 				"ms-azuretools.vscode-containers"
 			]
 		}
-	}
-
+	},
+	"dockerComposeFile": [
+		"../docker-compose.yaml",
+		"docker-compose.workspace.yaml"
+	],
+	"service": "workspace",
+	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}"
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
 

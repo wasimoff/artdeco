@@ -1,0 +1,8 @@
+services:
+  workspace:
+    image: mcr.microsoft.com/devcontainers/base:bullseye
+    volumes:
+      - ..:/workspaces:cached 
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: sleep infinity
+    network_mode: service:rabbitmq
