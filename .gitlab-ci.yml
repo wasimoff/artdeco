@@ -26,7 +26,21 @@ test:
   image: rust:latest
   before_script:
     # install protoc if your build.rs needs it
-    - apt-get update && apt-get install -y protobuf-compiler curl
+    - |
+      PROTOC_VERSION="24.3"
+      PROTOC_ZIP="protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+      
+      # Download protoc from GitHub releases
+      curl -OL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/${PROTOC_ZIP}"
+      
+      # Extract the binary and includes
+      unzip -o "${PROTOC_ZIP}" -d /usr/local bin/protoc
+      unzip -o "${PROTOC_ZIP}" -d /usr/local include/*
+      
+      # Clean up and verify
+      rm -f "${PROTOC_ZIP}"
+      protoc --version
+    - apt-get update && apt-get install -y curl
     # wait for rabbitmq mgmt API to be ready
     - |
       until curl -u "$RABBITMQ_DEFAULT_USER:$RABBITMQ_DEFAULT_PASS" \
