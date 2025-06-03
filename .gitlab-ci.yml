@@ -27,7 +27,7 @@ test:
   before_script:
     # install protoc if your build.rs needs it
     - |
-      PROTOC_VERSION="24.3"
+      PROTOC_VERSION="31.1"
       PROTOC_ZIP="protoc-${PROTOC_VERSION}-linux-x86_64.zip"
       
       # Download protoc from GitHub releases
