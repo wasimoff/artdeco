@@ -85,3 +85,15 @@ async fn handle_provider_message(mut consumer: Consumer)
         }
     }
 }
+
+fn schedule() {
+    // Schedule wasi binary
+}
+
+#[test]
+fn schedule_wasi_binary() {
+    // This function is a placeholder for scheduling the WASI binary.
+    // You can implement the logic to run the WASI binary here.
+    info!("Scheduling WASI binary execution...");
+    // Example: task::spawn(async { run_wasi_binary().await; });
+}
