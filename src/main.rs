@@ -86,7 +86,7 @@ async fn handle_provider_message(mut consumer: Consumer)
     }
 }
 
-fn schedule() {
+fn schedule_rr() {
     // Schedule wasi binary
 }
 

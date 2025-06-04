@@ -5,7 +5,9 @@
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
 	//"image": "mcr.microsoft.com/devcontainers/base:bullseye",
 	"features": {
-		"ghcr.io/devcontainers/features/rust:1": {},
+		"ghcr.io/devcontainers/features/rust:1": {
+			"targets": ["wasm32-wasip1"]
+		},
 		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
 		"ghcr.io/devcontainers-extra/features/protoc-asdf:1": {},
 	},
