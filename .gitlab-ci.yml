@@ -3,11 +3,9 @@ stages:
 
 services:
   nats:
-    image: nats:latest
-    ports:
-      - "4222:4222"
-      - "8222:8222"
-    command: "--cluster_name NATS --cluster nats://0.0.0.0:6222 --http_port 8222"
+    - name: nats:latest
+      alias: nats
+      command: "--cluster_name NATS --cluster nats://0.0.0.0:6222 --http_port 8222"
 
 test:
   stage: test
