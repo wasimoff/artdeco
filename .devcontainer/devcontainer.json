@@ -16,7 +16,9 @@
 		"vscode": {
 			"extensions": [
 				"ms-azuretools.vscode-containers",
-				"pbkit.vscode-pbkit"
+				"pbkit.vscode-pbkit",
+				"redhat.vscode-yaml",
+				"GitLab.gitlab-workflow"
 			]
 		}
 	},
