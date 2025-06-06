@@ -1,17 +1,20 @@
 use futures::StreamExt;
 use log::{info, trace};
 use protobuf::Message;
-use rabbitmq_stream_client::{
-    error::StreamCreateError, types::{ByteCapacity, OffsetSpecification, ResponseCode}, Consumer, ConsumerHandle, Environment
-};
-use tokio::task;
 
-include!(concat!(env!("OUT_DIR"), "/protos/mod.rs"));
+mod scheduler;
 
-struct CacheEntry {
-    id: String,
-
+mod protobuf_gen {
+    include!(concat!(env!("OUT_DIR"), "/protos/mod.rs"));
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProviderCacheEntry {
+    id: String,
+}
+
+#[derive(Debug, Clone)]
+struct Task {}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -19,75 +22,34 @@ async fn main() -> anyhow::Result<()> {
         .format_timestamp_secs()
         .init();
 
-    info!("Starting application...");
+    trace!("Starting application...");
 
-    let environment = Environment::builder()
-        .username("user")
-        .password("password")
-        .build()
-        .await?;
+    let client = async_nats::connect("nats").await?;
+    let mut subscriber = client.subscribe("providers").await?;
 
-    info!("Connected to RabbitMQ Stream API");
+    trace!("Connected to NATS server and subscribed to 'providers' channel.");
 
-    let stream = "provider-stream";
-    let create_response = environment
-        .stream_creator()
-        .max_length(ByteCapacity::GB(5))
-        .create(stream)
-        .await;
-
-    if let Err(e) = create_response {
-        if let StreamCreateError::Create { stream, status } = e {
-            match status {
-                // we can ignore this error because the stream already exists
-                ResponseCode::StreamAlreadyExists => {}
-                err => {
-                    println!("Error creating stream: {:?} {:?}", stream, err);
-                }
-            }
-        }
+    // Receive and process messages
+    while let Some(message) = subscriber.next().await {
+        handle_provider_message(message).await;
     }
-
-    let consumer = environment
-        .consumer()
-        .offset(OffsetSpecification::First)
-        .build(stream)
-        .await
-        .unwrap();
-
-    info!("Consumer created for stream: {}", stream);
-
-    let handle = consumer.handle();
-    handle_provider_message(consumer).await;
 
     Ok(())
 }
 
-async fn handle_provider_message(mut consumer: Consumer)
-{
-    while let Some(delivery) = consumer.next().await {
-        let d = delivery.unwrap();
-        trace!("Got message: {:#?} with offset: {}",
-                 d.message().data().map(|data| String::from_utf8(data.to_vec()).unwrap()),
-                 d.offset(),);
-        if let Some(data) = d.message().data() {
-            match deco::CacheEntry::parse_from_bytes(data){
-                Ok(cache_entry) => {
-                    trace!("Parsed CacheEntry: id={}", cache_entry.id.unwrap());
-                    // Process the cache entry here
-                }
-                Err(err) => {
-                    log::error!("Failed to parse CacheEntry: {}", err);
-                }
-            }
-        } else {
-            trace!("Message has no data");
+async fn handle_provider_message(message: async_nats::Message) {
+    trace!("Got message: {:#?}", message);
+    // Deserialize the message into a ProviderCacheEntry
+
+    match protobuf_gen::deco::CacheEntry::parse_from_bytes(&message.payload) {
+        Ok(cache_entry) => {
+            trace!("Parsed CacheEntry: {:?}", cache_entry);
+            // Process the cache entry here
+        }
+        Err(err) => {
+            log::error!("Failed to parse CacheEntry: {}", err);
         }
     }
-}
-
-fn schedule_rr() {
-    // Schedule wasi binary
 }
 
 #[test]

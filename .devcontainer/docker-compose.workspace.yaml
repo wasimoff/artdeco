@@ -2,7 +2,7 @@ services:
   workspace:
     image: mcr.microsoft.com/devcontainers/base:bullseye
     volumes:
-      - ..:/workspaces:cached 
+      - ..:/workspaces:cached
       - /var/run/docker.sock:/var/run/docker.sock
     command: sleep infinity
-    network_mode: service:rabbitmq
+    network_mode: service:nats
