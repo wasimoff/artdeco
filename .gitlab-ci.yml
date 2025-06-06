@@ -2,24 +2,12 @@ stages:
   - test
 
 services:
-  - name: rabbitmq:4-management
-    alias: rabbitmq
-    command:
-      - bash
-      - -lc
-      - |
-        rabbitmq-plugins enable --offline \
-          rabbitmq_stream \
-          rabbitmq_stream_management \
-          rabbitmq_shovel \
-          rabbitmq_shovel_management \
-        && rabbitmq-server
-
-variables:
-  RABBITMQ_DEFAULT_USER: user
-  RABBITMQ_DEFAULT_PASS: password
-  RABBITMQ_HOST: rabbitmq
-  RUST_BACKTRACE: 1
+  nats:
+    image: nats:latest
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: "--cluster_name NATS --cluster nats://0.0.0.0:6222 --http_port 8222"
 
 test:
   stage: test
@@ -40,13 +28,5 @@ test:
       # Clean up and verify
       rm -f "${PROTOC_ZIP}"
       protoc --version
-    - apt-get update && apt-get install -y curl
-    # wait for rabbitmq mgmt API to be ready
-    - |
-      until curl -u "$RABBITMQ_DEFAULT_USER:$RABBITMQ_DEFAULT_PASS" \
-               -sSf http://$RABBITMQ_HOST:15672/api/healthchecks/node; do
-        echo "Waiting for RabbitMQ..."
-        sleep 5
-      done
   script:
     - cargo test --verbose
