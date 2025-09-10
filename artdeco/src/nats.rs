@@ -4,11 +4,10 @@ use async_nats::{PublishMessage, Subject, ToServerAddrs};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use tracing::debug;
 
-use crate::{TaskResult, daemon, scheduler::Scheduler, task::Task};
+use crate::{Workload, daemon, scheduler::Scheduler, task::WorkloadResult};
 
-pub async fn daemon_nats(
-    task_queue: impl Stream<Item = Task> + Unpin,
-    task_result_sink: impl Sink<TaskResult> + Unpin,
+pub async fn daemon_nats<S: Sink<WorkloadResult> + Unpin>(
+    task_queue: impl Stream<Item = Workload<S>> + Unpin,
     scheduler: impl Scheduler,
     nats_url: impl ToServerAddrs,
 ) -> anyhow::Result<()> {
@@ -31,13 +30,5 @@ pub async fn daemon_nats(
         })
     );
 
-    daemon(
-        task_queue,
-        task_result_sink,
-        provider_stream,
-        sdp_stream,
-        sdp_sink,
-        scheduler,
-    )
-    .await
+    daemon(task_queue, provider_stream, sdp_stream, sdp_sink, scheduler).await
 }

@@ -4,7 +4,7 @@ use nid::Nanoid;
 
 use crate::{
     scheduler::{Output, Scheduler},
-    task::Task,
+    task::{Task, TaskResult},
 };
 
 pub struct Fixed {
@@ -55,11 +55,11 @@ impl Scheduler for Fixed {
         return Output::Timeout(self.last_instant + Duration::from_secs(10));
     }
 
-    fn schedule(&mut self, task: crate::task::Task) {
+    fn schedule(&mut self, task: Task) {
         self.task_list.push(task);
     }
 
-    fn handle_taskresult(&mut self, uuid: Nanoid, task_result: crate::provider::TaskStatus) {
-        todo!()
+    fn handle_taskresult(&mut self, uuid: Nanoid, task_result: TaskResult) -> Option<TaskResult> {
+        Some(task_result)
     }
 }

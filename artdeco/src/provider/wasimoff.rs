@@ -1,19 +1,22 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    mem,
+    time::{Duration, Instant},
 };
 
 use nid::Nanoid;
 use protobuf::{Message, MessageField, MessageFull, well_known_types::any::Any};
-use tracing::debug;
+use tracing::{debug, error};
 
-use crate::protobuf_gen::wasimoff::envelope::MessageType;
-use crate::protobuf_gen::wasimoff::task::wasip1::{self};
-use crate::protobuf_gen::wasimoff::task::{self};
 use crate::{protobuf_gen::wasimoff, task::Task};
+use crate::{protobuf_gen::wasimoff::Envelope, provider::TaskMetrics};
+use crate::{protobuf_gen::wasimoff::envelope::MessageType, task::TaskResult};
 use crate::{
-    protobuf_gen::wasimoff::Envelope,
-    provider::{TaskMetrics, TaskStatus},
+    protobuf_gen::wasimoff::task::wasip1::{self},
+    task::Status,
+};
+use crate::{
+    protobuf_gen::wasimoff::task::{self, QoS},
+    task::TaskId,
 };
 
 #[derive(PartialEq, Eq, Hash)]
@@ -23,107 +26,102 @@ pub struct WasimoffConfig {
 
 pub struct WasimoffProvider {
     config: WasimoffConfig,
-    state: State,
-    pending_transmits: VecDeque<Envelope>,
+    pending_outputs: VecDeque<Output>,
     next_sequence: u64,
-    next_task_id: u64,
-    task_status: HashMap<u64, TaskStatus>,
-    sequence_task_map: HashMap<u64, u64>,
+    active_offloads: HashMap<u64, ActiveTask>,
     remote_files: HashSet<String>,
+    last_instant: Instant,
 }
 
-pub enum State {
-    Invalid,
-    Standby,
+pub enum Output {
+    Transmit(Vec<u8>),
+    TaskResult(TaskResult),
+    Timeout(Instant),
 }
 
-impl Default for State {
-    fn default() -> Self {
-        State::Invalid
-    }
+struct ActiveTask {
+    metrics: TaskMetrics,
+    id: TaskId,
 }
-
-pub struct Transmit(pub Vec<u8>);
 
 impl WasimoffProvider {
     pub fn new(config: WasimoffConfig) -> Self {
         Self {
             config,
-            state: State::Standby,
-            pending_transmits: VecDeque::new(),
+            pending_outputs: VecDeque::new(),
             next_sequence: 1,
-            next_task_id: 1,
-            task_status: HashMap::new(),
-            sequence_task_map: HashMap::new(),
+            active_offloads: HashMap::new(),
             remote_files: HashSet::new(),
+            last_instant: Instant::now(),
         }
     }
 
     pub fn handle_input(&mut self, buffer: &[u8]) {
-        let state = mem::take(&mut self.state);
         let envelope = Envelope::parse_from_bytes(buffer).unwrap();
         let sequence_number = envelope.sequence();
-        self.state = match state {
-            State::Invalid => panic!("invalid wasimoff state"),
-            State::Standby => {
-                let pending_task = *self
-                    .sequence_task_map
-                    .get(&sequence_number)
-                    .expect("expected matching pending task for sequence number");
-                debug!("Received envelope payload {:?}", envelope.payload);
-                let task_response: wasip1::Response = envelope.payload.unpack().unwrap().unwrap();
-                let result = task_response.result.unwrap();
-                match result {
-                    wasip1::response::Result::Error(message) => {
-                        self.task_status
-                            .insert(pending_task, TaskStatus::ExecutionError(message));
-                    }
-                    wasip1::response::Result::Ok(output) => {
-                        debug!("Received ok response {:?}", output);
-                        let wasip1::Output {
-                            status,
-                            stdout,
-                            stderr,
-                            artifacts,
-                            special_fields: _,
-                        } = output;
-                        self.task_status.insert(
-                            pending_task,
-                            TaskStatus::Finished {
-                                metrics: TaskMetrics::default(),
-                                exit_code: status.unwrap(),
-                                stdout: stdout.unwrap(),
-                                stderr: stderr.unwrap(),
-                                artifacts: artifacts.blob().to_vec(),
-                            },
-                        );
-                    }
-                    wasip1::response::Result::Qoserror(message) => {
-                        self.task_status
-                            .insert(pending_task, TaskStatus::QoSError(message));
-                    }
-                }
-                State::Standby
+
+        let pending_task = self.active_offloads.remove(&sequence_number);
+        if pending_task.is_none() {
+            error!(
+                "expected matching pending task for sequence number {}",
+                sequence_number
+            );
+            return;
+        }
+        let pending_task = pending_task.unwrap();
+
+        // TODO set metrics
+
+        debug!("Received envelope payload {:?}", envelope.payload);
+        let task_response: wasip1::Response = envelope.payload.unpack().unwrap().unwrap();
+        let result = task_response.result.unwrap();
+
+        match result {
+            wasip1::response::Result::Error(message) => {
+                let error_output = Output::TaskResult(TaskResult {
+                    id: pending_task.id,
+                    status: Status::Error(message),
+                    metrics: pending_task.metrics,
+                });
+                self.pending_outputs.push_back(error_output);
+            }
+            wasip1::response::Result::Qoserror(message) => {
+                let error_output = Output::TaskResult(TaskResult {
+                    id: pending_task.id,
+                    status: Status::QoSError(message),
+                    metrics: pending_task.metrics,
+                });
+                self.pending_outputs.push_back(error_output);
+            }
+            wasip1::response::Result::Ok(output) => {
+                debug!("Received ok response {:?}", output);
+                let wasip1::Output {
+                    status,
+                    stdout,
+                    stderr,
+                    mut artifacts,
+                    special_fields: _,
+                } = output;
+                let ok_output = Output::TaskResult(TaskResult {
+                    id: pending_task.id,
+                    status: Status::Finished {
+                        exit_code: status.unwrap(),
+                        stdout: stdout.unwrap(),
+                        stderr: stderr.unwrap(),
+                        output_file: artifacts.take().map(|mut file| file.take_blob()),
+                    },
+                    metrics: pending_task.metrics,
+                });
+                self.pending_outputs.push_back(ok_output);
             }
         }
     }
 
-    pub fn poll_output(&mut self) -> Option<Transmit> {
-        match &mut self.state {
-            State::Invalid => panic!("invalid wasimoff state"),
-            State::Standby => {
-                if !self.pending_transmits.is_empty() {
-                    return Some(Transmit(
-                        self.pending_transmits
-                            .pop_front()
-                            .unwrap()
-                            .write_to_bytes()
-                            .unwrap(),
-                    ));
-                } else {
-                    return None;
-                }
-            }
+    pub fn poll_output(&mut self) -> Output {
+        if !self.pending_outputs.is_empty() {
+            self.pending_outputs.pop_front().unwrap()
+        } else {
+            Output::Timeout(self.last_instant + Duration::from_secs(10))
         }
     }
 
@@ -136,31 +134,39 @@ impl WasimoffProvider {
         envelope
     }
 
-    pub fn offload(&mut self, task: Task) -> u64 {
-        let State::Standby = self.state else {
-            panic!("invalid state");
-        };
-        debug!("offloading in provider");
+    pub fn offload(&mut self, task: Task) {
         let Task {
             executable,
             args,
-            submit_instant: instant,
+            id,
+            metrics,
         } = task;
         let mut offload_message = wasip1::Request::new();
 
         let mut metadata = task::Metadata::new();
-        let task_id = self.next_task_id;
-        self.sequence_task_map.insert(self.next_sequence, task_id);
-        metadata.set_id(task_id.to_string());
-        self.next_task_id += 1;
+        // task id
+        let task_id = match id {
+            crate::task::TaskId::Consumer(id_usize) => {
+                format!("{}:c:{}", self.config.client_identifier, id_usize)
+            }
+            crate::task::TaskId::Scheduler(id_usize) => {
+                format!("{}:s:{}", self.config.client_identifier, id_usize)
+            }
+        };
+        metadata.set_id(task_id);
         offload_message.info = MessageField::some(metadata);
 
+        // qos
+        let mut qos = QoS::new();
+        qos.set_immediate(true);
+        offload_message.qos = MessageField::some(qos);
+
         let mut file = wasimoff::File::new();
-        let file_ref = executable.file_ref.clone();
-        // check if task file exists on remote
+        let file_ref = executable.hash_ref().clone();
+        // check if task file has been uploaded before
         if !self.remote_files.contains(&file_ref) {
             // attach file as blob
-            file.set_blob(executable.content);
+            file.set_blob(executable.content().to_vec());
             // mark file as cached
             self.remote_files.insert(file_ref.clone());
         }
@@ -172,11 +178,10 @@ impl WasimoffProvider {
         offload_message.params = MessageField::some(params);
 
         let envelope = self.pack(&offload_message);
-        self.pending_transmits.push_back(envelope);
-
-        self.task_status.insert(task_id, TaskStatus::Running);
-
-        task_id
+        self.active_offloads
+            .insert(envelope.sequence(), ActiveTask { metrics, id });
+        let bytes = envelope.write_to_bytes().unwrap();
+        self.pending_outputs.push_back(Output::Transmit(bytes));
     }
 }
 

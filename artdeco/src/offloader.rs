@@ -3,15 +3,16 @@ use std::time::{Duration, Instant};
 use nid::Nanoid;
 use serde::{Deserialize, Serialize};
 use str0m::net::{Receive, Transmit};
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info};
 
 use crate::{
     connection::{
-        self, rtc_connection::{RTCConnectionConfig, SdpMessage}, RtcConnectionManager
+        self, RtcConnectionManager,
+        rtc_connection::{RTCConnectionConfig, SdpMessage},
     },
     provider::{self, ProviderManager},
     scheduler::{self, ProviderState, Scheduler},
-    task::Task,
+    task::{Task, TaskResult},
 };
 
 pub enum Input<'a> {
@@ -23,7 +24,7 @@ pub enum Output {
     Timeout(Instant),
     SocketTransmit(Transmit),
     SdpTransmit(String),
-    TaskStatusUpdate,
+    TaskResult(TaskResult),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -101,14 +102,18 @@ impl<S: Scheduler> Offloader<S> {
         }
 
         match self.provider_manager.poll_output() {
-            provider::Output::TaskStatusUpdate(status) => todo!("task status not yet implemented"),
+            provider::Output::TaskResult(uuid, task_result) => {
+                if let Some(result) = self.scheduler.handle_taskresult(uuid, task_result) {
+                    return Output::TaskResult(result);
+                }
+            }
             provider::Output::ProviderTransmit(uuid, items) => {
                 debug!("sending provider transmit to connection {}", uuid);
                 if let Err(err) = self.connection_manager.send(uuid, &items) {
                     error!("cannot send to {} because of {}", uuid, err);
                 }
             }
-            provider::Output::None => trace!("provider none output"),
+            provider::Output::Timeout(instant) => next_timeout = next_timeout.min(instant),
         }
 
         match self.connection_manager.poll_output() {

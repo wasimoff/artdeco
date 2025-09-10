@@ -2,6 +2,7 @@ use std::{fmt::Display, net::IpAddr, time::Instant};
 
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use nid::Nanoid;
+use slab::Slab;
 use str0m::net::{Protocol, Receive};
 use systemstat::{Platform, System};
 use tokio::{net::UdpSocket, time::sleep_until};
@@ -11,7 +12,7 @@ use crate::{
     connection::rtc_connection::RTCConnectionConfig,
     offloader::{Input, Offloader, ProviderAnnounce},
     scheduler::Scheduler,
-    task::Task,
+    task::{Task, TaskResult, Workload, WorkloadResult},
 };
 
 pub mod connection;
@@ -49,11 +50,8 @@ pub fn select_host_address() -> IpAddr {
     panic!("Found no usable network interface");
 }
 
-pub struct TaskResult {}
-
-pub async fn daemon(
-    task_queue: impl Stream<Item = Task> + Unpin,
-    mut task_result_sink: impl Sink<TaskResult> + Unpin,
+pub async fn daemon<S: Sink<WorkloadResult> + Unpin>(
+    task_queue: impl Stream<Item = Workload<S>> + Unpin,
     mut provider_stream: impl Stream<Item = String> + Unpin,
     mut sdp_stream: impl Stream<Item = String> + Unpin,
     mut sdp_sink: impl Sink<String, Error = impl Display> + Unpin,
@@ -72,6 +70,7 @@ pub async fn daemon(
     };
     let mut offloader = Offloader::new(rtc_config, scheduler);
     let mut udp_buffer = vec![0; 2000];
+    let mut active_tasks = Slab::new();
 
     let mut fused_task_queue = task_queue.fuse();
 
@@ -98,9 +97,14 @@ pub async fn daemon(
                 }
                 continue;
             }
-            offloader::Output::TaskStatusUpdate => {
-                todo!("implement task result handling!!!");
-                //continue;
+            offloader::Output::TaskResult(result) => {
+                // receive task result
+                // lookup response channel from slab by index
+                // construct WorkloadResult
+                // send result to response channel
+                error!("implement task result handling!!!");
+                info!("received result: {:?}", result);
+                continue;
             }
         };
 
@@ -110,7 +114,9 @@ pub async fn daemon(
                 if let Some(next_task) = task {
                     debug!("task queue new task");
                     // offload task using offloader
-                    offloader.handle_task(next_task);
+                    // deconstruct Workload, insert channel into slab, create new task
+                    let task = next_task.to_task(&mut active_tasks);
+                    offloader.handle_task(task);
                 }
             }
             // poll announce stream for new providers
@@ -192,20 +198,13 @@ pub async fn daemon(
 
 #[cfg(test)]
 mod test {
-    use std::{net::SocketAddr, str::FromStr, time::Instant};
+    use std::{net::SocketAddr, str::FromStr};
 
-    use futures::sink::drain;
     use nid::Nanoid;
     use str0m::{Candidate, net::Protocol};
-    use tokio::sync::mpsc;
-    use tokio_stream::wrappers::ReceiverStream;
     use tracing::Level;
 
-    use crate::{
-        connection::rtc_connection::{Sdp, SdpMessage},
-        scheduler::fixed::Fixed,
-        task::{Task, TaskExecutable},
-    };
+    use crate::connection::rtc_connection::{Sdp, SdpMessage};
 
     fn setup_logging() {
         let subscriber = tracing_subscriber::fmt()
@@ -213,31 +212,6 @@ mod test {
             .finish();
         tracing::subscriber::set_global_default(subscriber)
             .map_err(|_err| eprintln!("Unable to set global default subscriber"))
-            .unwrap();
-    }
-
-    #[tokio::test]
-    #[cfg(feature = "nats")]
-    async fn schedule_wasi_binary() {
-        setup_logging();
-
-        let (sender, receiver) = mpsc::channel(100);
-        let wasm_content = std::fs::read("wasi-apps/fibonacci/exe.wasm").unwrap();
-        let args = vec!["test.wasm".to_owned(), "32".to_owned()];
-        let task = Task {
-            executable: TaskExecutable {
-                file_ref: "test.wasm".to_owned(),
-                content: wasm_content,
-            },
-            args,
-            submit_instant: Instant::now(),
-        };
-        sender.send(task).await.unwrap();
-        let receiver_stream = ReceiverStream::new(receiver);
-        let scheduler = Fixed::new();
-
-        crate::nats::daemon_nats(receiver_stream, drain(), scheduler, "nats")
-            .await
             .unwrap();
     }
 

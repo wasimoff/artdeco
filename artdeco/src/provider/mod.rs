@@ -1,13 +1,13 @@
 use std::{
     collections::{HashMap, VecDeque},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use nid::Nanoid;
 
 use crate::{
     provider::wasimoff::{WasimoffConfig, WasimoffProvider},
-    task::Task,
+    task::{Task, TaskMetrics, TaskResult},
 };
 
 pub mod wasimoff;
@@ -17,42 +17,21 @@ pub struct TaskHandle {
     pub(crate) id: u64,
 }
 
-#[derive(Default, Clone, Copy)]
-pub struct TaskMetrics {
-    transmitTime: u64,
-    startTime: u64,
-    endTime: u64,
-    receivedTime: u64,
-}
-
-#[derive(Clone)]
-pub enum TaskStatus {
-    Running,
-    Finished {
-        metrics: TaskMetrics,
-        exit_code: i32,
-        stdout: Vec<u8>,
-        stderr: Vec<u8>,
-        artifacts: Vec<u8>,
-    },
-    ExecutionError(String),
-    QoSError(String),
-}
-
 pub enum Input {
     Timeout(Instant),
     ProviderReceive(Nanoid, Vec<u8>),
 }
 
 pub enum Output {
-    TaskStatusUpdate(TaskStatus),
+    TaskResult(Nanoid, TaskResult),
     ProviderTransmit(Nanoid, Vec<u8>),
-    None,
+    Timeout(Instant),
 }
 
 pub struct ProviderManager {
     wasimoff_providers: HashMap<Nanoid, WasimoffProvider>,
     output_buffer: VecDeque<Output>,
+    last_instant: Instant,
 }
 
 impl ProviderManager {
@@ -60,6 +39,7 @@ impl ProviderManager {
         Self {
             wasimoff_providers: HashMap::new(),
             output_buffer: VecDeque::new(),
+            last_instant: Instant::now(),
         }
     }
 
@@ -93,12 +73,23 @@ impl ProviderManager {
     }
 
     pub fn poll_output(&mut self) -> Output {
+        let mut smallest_timeout = self.last_instant + Duration::from_secs(10);
+
         for (id, provider) in &mut self.wasimoff_providers {
-            if let Some(output) = provider.poll_output() {
-                self.output_buffer
-                    .push_back(Output::ProviderTransmit(*id, output.0));
+            match provider.poll_output() {
+                wasimoff::Output::Transmit(items) => self
+                    .output_buffer
+                    .push_back(Output::ProviderTransmit(*id, items)),
+                wasimoff::Output::TaskResult(task_result) => self
+                    .output_buffer
+                    .push_back(Output::TaskResult(*id, task_result)),
+                wasimoff::Output::Timeout(instant) => {
+                    smallest_timeout = smallest_timeout.min(instant)
+                }
             }
         }
-        self.output_buffer.pop_front().unwrap_or(Output::None)
+        self.output_buffer
+            .pop_front()
+            .unwrap_or(Output::Timeout(smallest_timeout))
     }
 }

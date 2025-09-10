@@ -1,8 +1,7 @@
 use crate::{
     offloader::ProviderAnnounce,
-    provider::TaskStatus,
     scheduler::{Output, ProviderState, Scheduler},
-    task::Task,
+    task::{Task, TaskResult},
 };
 use nid::Nanoid;
 use std::time::Instant;
@@ -30,8 +29,9 @@ impl Scheduler for SchedulerRoundRobin {
         // TODO: Implement provider state handling for round robin scheduler
     }
 
-    fn handle_taskresult(&mut self, _uuid: Nanoid, _task_result: TaskStatus) {
+    fn handle_taskresult(&mut self, _uuid: Nanoid, _task_result: TaskResult) -> Option<TaskResult> {
         // TODO: Implement task result handling for round robin scheduler
+        None
     }
 
     fn poll_output(&mut self) -> Output {

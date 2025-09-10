@@ -2,7 +2,10 @@ use std::time::Instant;
 
 use nid::Nanoid;
 
-use crate::{offloader::ProviderAnnounce, provider::TaskStatus, task::Task};
+use crate::{
+    offloader::ProviderAnnounce,
+    task::{Task, TaskResult},
+};
 
 pub mod bandit;
 pub mod fixed;
@@ -37,7 +40,7 @@ pub trait Scheduler {
     /// Connected/Disconnected/Failure events
     fn handle_provider_state(&mut self, uuid: Nanoid, provider_state: ProviderState);
 
-    fn handle_taskresult(&mut self, uuid: Nanoid, task_result: TaskStatus);
+    fn handle_taskresult(&mut self, uuid: Nanoid, task_result: TaskResult) -> Option<TaskResult>;
 
     /// Poll scheduler for new events
     fn poll_output(&mut self) -> Output;

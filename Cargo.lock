@@ -46,6 +46,8 @@ dependencies = [
  "protoc-rust",
  "serde",
  "serde_json",
+ "sha2",
+ "slab",
  "str0m",
  "systemstat",
  "tokio",
@@ -1583,8 +1585,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "artdeco",
+ "futures",
  "tokio",
  "tokio-stream",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
