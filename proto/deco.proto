@@ -1,5 +1,0 @@
-edition = "2023";
-
-message CacheEntry {
-    string id = 1;
-}

@@ -60,6 +60,7 @@ message Task {
   message QoS {
     bool priority = 1;
     google.protobuf.Timestamp deadline = 2;
+    bool immediate = 3; // schedule immediately or fail task execution if no worker is available
     // TODO
   }
 
@@ -117,6 +118,7 @@ message Task {
       oneof result {
         string error = 2;
         Output ok = 3;
+        string qoserror = 4; // Task failed to schedule because of QoS requirements
       }
     }
 
@@ -275,12 +277,6 @@ message Event {
   // GenericMessage is just a generic piece of text for logging
   message GenericMessage {
     string message = 1;
-  }
-
-  // ProviderHello is sent once at the beginning to identify the Provider
-  message ProviderHello {
-    string name = 1; // a logging-friendly name of the provider
-    string useragent = 2; // like the navigator.useragent in browser
   }
 
   // ProviderResources is information about the available resources in Worker pool

@@ -6,20 +6,23 @@
 	//"image": "mcr.microsoft.com/devcontainers/base:bullseye",
 	"features": {
 		"ghcr.io/devcontainers/features/rust:1": {
-			"targets": ["wasm32-wasip1"]
+			"targets": [
+				"wasm32-wasip1"
+			]
 		},
 		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
 		"ghcr.io/devcontainers-extra/features/protoc-asdf:1": {},
 	},
-
 	"customizations": {
 		"vscode": {
 			"extensions": [
 				"ms-azuretools.vscode-containers",
 				"pbkit.vscode-pbkit",
 				"redhat.vscode-yaml",
-				"GitLab.gitlab-workflow"
-			]
+			],
+			"settings": {
+				"terminal.integrated.defaultProfile.linux": "bash",
+			}
 		}
 	},
 	"dockerComposeFile": [
@@ -27,16 +30,13 @@
 		"docker-compose.workspace.yaml"
 	],
 	"service": "workspace",
-	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}"
+	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
-
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
-
 	// Configure tool-specific properties.
 	// "customizations": {},
-
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "root"
 }

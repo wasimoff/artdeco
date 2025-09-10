@@ -4,8 +4,17 @@ services:
     ports:
       - "4222:4222"
       - "8222:8222"
-    command: "--cluster_name NATS --cluster nats://0.0.0.0:6222 --http_port 8222"
-    networks: [ "nats" ]
+      - "8080:8080"
+    command: "--config /etc/nats/nats.conf"
+    volumes:
+      - "./nats.conf:/etc/nats/nats.conf:ro"
+    networks: [ "nats", "default" ]
+
+  provider:
+    image: ansemjo/wasimoff:provider
+    restart: unless-stopped
+    command: ["--url", "http://nats:8080", "--deco"]
+    networks: [ "nats", "default" ]
 
 networks:
   nats:

@@ -5,4 +5,6 @@ services:
       - ..:/workspaces:cached
       - /var/run/docker.sock:/var/run/docker.sock
     command: sleep infinity
-    network_mode: service:nats
+    networks:
+      - nats
+      - default
