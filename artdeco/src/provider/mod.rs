@@ -45,8 +45,11 @@ impl ProviderManager {
 
     pub fn handle_input(&mut self, input: Input) {
         match input {
-            Input::Timeout(_instant) => {
-                // Ignore Timeout
+            Input::Timeout(instant) => {
+                self.last_instant = instant;
+                for (_, provider) in &mut self.wasimoff_providers {
+                    provider.handle_timeout(instant);
+                }
             }
             Input::ProviderReceive(nanoid, items) => {
                 if let Some(provider) = self.wasimoff_providers.get_mut(&nanoid) {
