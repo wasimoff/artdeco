@@ -12,7 +12,7 @@ use crate::{
     connection::rtc_connection::RTCConnectionConfig,
     offloader::{Input, Offloader, ProviderAnnounce},
     scheduler::Scheduler,
-    task::{Task, TaskResult, Workload, WorkloadResult},
+    task::{Workload, WorkloadResult},
 };
 
 pub mod connection;
@@ -202,18 +202,8 @@ mod test {
 
     use nid::Nanoid;
     use str0m::{Candidate, net::Protocol};
-    use tracing::Level;
 
     use crate::connection::rtc_connection::{Sdp, SdpMessage};
-
-    fn setup_logging() {
-        let subscriber = tracing_subscriber::fmt()
-            .with_max_level(Level::DEBUG)
-            .finish();
-        tracing::subscriber::set_global_default(subscriber)
-            .map_err(|_err| eprintln!("Unable to set global default subscriber"))
-            .unwrap();
-    }
 
     #[test]
     fn test_candidate_serde_de() {
