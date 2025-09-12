@@ -82,17 +82,14 @@ impl WasimoffProvider {
 
         match result {
             wasip1::response::Result::Error(message) => {
+                let status = if message.starts_with("qos") {
+                    Status::QoSError(message)
+                } else {
+                    Status::Error(message)
+                };
                 let error_output = Output::TaskResult(TaskResult {
                     id: pending_task.id,
-                    status: Status::Error(message),
-                    metrics: pending_task.metrics,
-                });
-                self.pending_outputs.push_back(error_output);
-            }
-            wasip1::response::Result::Qoserror(message) => {
-                let error_output = Output::TaskResult(TaskResult {
-                    id: pending_task.id,
-                    status: Status::QoSError(message),
+                    status,
                     metrics: pending_task.metrics,
                 });
                 self.pending_outputs.push_back(error_output);

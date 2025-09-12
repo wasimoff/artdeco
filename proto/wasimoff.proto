@@ -118,7 +118,6 @@ message Task {
       oneof result {
         string error = 2;
         Output ok = 3;
-        string qoserror = 4; // Task failed to schedule because of QoS requirements
       }
     }
 
