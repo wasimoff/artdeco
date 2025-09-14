@@ -13,7 +13,7 @@ services:
   provider:
     image: ansemjo/wasimoff:provider
     restart: unless-stopped
-    command: ["--url", "http://nats:8080", "--deco"]
+    command: ["--url", "ad://nats:8080/?announce=5"]
     networks: [ "nats", "default" ]
 
 networks:
