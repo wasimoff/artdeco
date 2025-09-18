@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use nid::Nanoid;
 use serde::{Deserialize, Serialize};
 use str0m::net::{Receive, Transmit};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 
 use crate::{
     connection::{
@@ -96,7 +96,7 @@ impl<S: Scheduler> Offloader<S> {
         match self.scheduler.poll_output() {
             scheduler::Output::Timeout(instant) => next_timeout = next_timeout.min(instant),
             scheduler::Output::Connect(uuid) => {
-                info!("received connection request for {} from scheduler", uuid);
+                trace!("received connection request for {} from scheduler", uuid);
                 self.connection_manager.connect(uuid);
                 self.provider_manager.create(uuid);
             }

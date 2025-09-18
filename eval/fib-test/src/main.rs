@@ -38,7 +38,10 @@ async fn main() -> anyhow::Result<()> {
     // Create a scheduler
     let scheduler = Fixed::new();
     //let receiver_stream = ReceiverStream::new(receiver);
-    daemon_nats(receiver, scheduler, "nats").await?;
+    let args: Vec<String> = std::env::args().collect();
+    let binding = "nats".to_string();
+    let nats_url = args.get(1).unwrap_or(&binding);
+    daemon_nats(receiver, scheduler, nats_url).await?;
     let result = response_receiver.next().await.unwrap();
     info!("received response in main, {:?}", result);
     Ok(())
