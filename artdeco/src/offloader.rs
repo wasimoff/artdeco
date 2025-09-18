@@ -125,6 +125,7 @@ impl<S: Scheduler> Offloader<S> {
                         data_event.destination,
                         data_event.data,
                     ));
+                return Output::Timeout(self.last_instant);
             }
             connection::Output::SdpTransmit(sdp_message) => {
                 return Output::SdpTransmit(sdp_message);
@@ -132,12 +133,16 @@ impl<S: Scheduler> Offloader<S> {
             connection::Output::UdpTransmit(transmit) => {
                 return Output::SocketTransmit(transmit);
             }
-            connection::Output::ChannelOpen(nanoid) => self
-                .scheduler
-                .handle_provider_state(nanoid, ProviderState::Connected),
-            connection::Output::ChannelClosed(nanoid) => self
-                .scheduler
-                .handle_provider_state(nanoid, ProviderState::Disconnected),
+            connection::Output::ChannelOpen(nanoid) => {
+                self.scheduler
+                    .handle_provider_state(nanoid, ProviderState::Connected);
+                return Output::Timeout(self.last_instant);
+            }
+            connection::Output::ChannelClosed(nanoid) => {
+                self.scheduler
+                    .handle_provider_state(nanoid, ProviderState::Disconnected);
+                return Output::Timeout(self.last_instant);
+            }
         }
 
         return Output::Timeout(next_timeout);
