@@ -3,10 +3,9 @@ use artdeco::{
     scheduler::fixed::Fixed,
     task::{TaskExecutable, Workload},
 };
-use futures::sink::drain;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
-use tracing::Level;
+use futures::{StreamExt, channel::mpsc};
+
+use tracing::{Level, info};
 
 const FIBBONACCI_WASM: &[u8; 59778] = include_bytes!("../fibbonacci.wasm");
 
@@ -20,22 +19,27 @@ async fn main() -> anyhow::Result<()> {
         .unwrap();
 
     // Create a task queue
-    let (sender, receiver) = mpsc::channel(1);
+    let (mut sender, receiver) = mpsc::channel(1);
+    // Create response queue
+    let (response_sender, mut response_receiver) = mpsc::channel(1);
 
     // Create a workload
     let exec = TaskExecutable::new(FIBBONACCI_WASM as &[u8]);
     let workload = Workload {
         executable: exec,
         args: vec!["fibonacci.wasm".to_owned(), "10".to_owned()],
-        response_channel: drain(),
+        response_channel: response_sender,
     };
 
     // Send the workload to the queue
-    sender.send(workload).await?;
+    sender.start_send(workload)?;
     drop(sender); // drop sender so the daemon stops after offloading all tasks
 
     // Create a scheduler
     let scheduler = Fixed::new();
-    let receiver_stream = ReceiverStream::new(receiver);
-    daemon_nats(receiver_stream, scheduler, "nats").await
+    //let receiver_stream = ReceiverStream::new(receiver);
+    daemon_nats(receiver, scheduler, "nats").await?;
+    let result = response_receiver.next().await.unwrap();
+    info!("received response in main, {:?}", result);
+    Ok(())
 }

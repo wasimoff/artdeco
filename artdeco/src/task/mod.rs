@@ -120,6 +120,7 @@ impl TaskResult {
     }
 }
 
+#[derive(Debug)]
 pub struct WorkloadResult {
     // timestamps, error/success code, std...
     pub status: Status,
