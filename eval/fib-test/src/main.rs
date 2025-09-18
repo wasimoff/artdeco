@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Send the workload to the queue
     sender.send(workload).await?;
-    //drop(sender); // drop sender so the daemon stops after offloading all tasks
+    drop(sender); // drop sender so the daemon stops after offloading all tasks
 
     // Create a scheduler
     let scheduler = Fixed::new();

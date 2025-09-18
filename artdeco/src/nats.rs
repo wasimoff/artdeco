@@ -1,4 +1,4 @@
-use std::pin::pin;
+use std::{fmt::Display, pin::pin};
 
 use async_nats::{PublishMessage, Subject, ToServerAddrs};
 use futures::{Sink, SinkExt, Stream, StreamExt};
@@ -6,7 +6,7 @@ use tracing::debug;
 
 use crate::{Workload, daemon, scheduler::Scheduler, task::WorkloadResult};
 
-pub async fn daemon_nats<S: Sink<WorkloadResult> + Unpin>(
+pub async fn daemon_nats<S: Sink<WorkloadResult, Error = impl Display> + Unpin>(
     task_queue: impl Stream<Item = Workload<S>> + Unpin,
     scheduler: impl Scheduler,
     nats_url: impl ToServerAddrs,

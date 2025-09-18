@@ -50,7 +50,7 @@ pub fn select_host_address() -> IpAddr {
     panic!("Found no usable network interface");
 }
 
-pub async fn daemon<S: Sink<WorkloadResult> + Unpin>(
+pub async fn daemon<S: Sink<WorkloadResult, Error = impl Display> + Unpin>(
     task_queue: impl Stream<Item = Workload<S>> + Unpin,
     mut provider_stream: impl Stream<Item = String> + Unpin,
     mut sdp_stream: impl Stream<Item = String> + Unpin,
@@ -70,7 +70,7 @@ pub async fn daemon<S: Sink<WorkloadResult> + Unpin>(
     };
     let mut offloader = Offloader::new(rtc_config, scheduler);
     let mut udp_buffer = vec![0; 2000];
-    let mut active_tasks = Slab::new();
+    let mut active_tasks: Slab<S> = Slab::new();
 
     let mut fused_task_queue = task_queue.fuse();
 
@@ -98,12 +98,11 @@ pub async fn daemon<S: Sink<WorkloadResult> + Unpin>(
                 continue;
             }
             offloader::Output::TaskResult(result) => {
-                // receive task result
-                // lookup response channel from slab by index
-                // construct WorkloadResult
-                // send result to response channel
-                error!("implement task result handling!!!");
-                info!("received result: {:?}", result);
+                trace!("received result: {:?}", result);
+                let (mut channel, workload_result) = result.to_workload_result(&mut active_tasks);
+                if let Err(err) = channel.send(workload_result).await {
+                    error!("could not respond with workload result, {}", err);
+                }
                 continue;
             }
         };
@@ -186,7 +185,7 @@ pub async fn daemon<S: Sink<WorkloadResult> + Unpin>(
             }
             // poll timeout
             _ = sleep_until(next_timeout.into()) => {
-                if fused_task_queue.is_done() {
+                if fused_task_queue.is_done() && active_tasks.is_empty(){
                     return Ok(())
                 }
                 trace!("next timeout for offloader");

@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use bytes::Bytes;
 use futures::Sink;
 use sha2::{Digest, Sha256};
@@ -106,11 +104,24 @@ impl TaskResult {
     pub(crate) fn to_workload_result<S: Sink<WorkloadResult>>(
         self,
         slab: &mut Slab<S>,
-    ) -> WorkloadResult {
-        todo!()
+    ) -> (S, WorkloadResult) {
+        let Self {
+            id,
+            status,
+            metrics,
+        } = self;
+        if let TaskId::Consumer(key) = id {
+            let sink = slab.remove(key);
+            let workload_result = WorkloadResult { status, metrics };
+            return (sink, workload_result);
+        } else {
+            panic!("should not be called with scheduler tasks");
+        }
     }
 }
 
 pub struct WorkloadResult {
     // timestamps, error/success code, std...
+    pub status: Status,
+    pub metrics: TaskMetrics,
 }
