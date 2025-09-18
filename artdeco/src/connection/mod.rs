@@ -29,7 +29,7 @@ pub struct DataInput {
 
 pub enum Output {
     Timeout(Instant),
-    Message(DataEvent),
+    Message(Instant, DataEvent),
     SdpTransmit(String),
     UdpTransmit(Transmit),
     ChannelOpen(Nanoid),
@@ -138,10 +138,13 @@ impl RtcConnectionManager {
                         .push_back(Output::SdpTransmit(serialized_sdp))
                 }
                 rtc_connection::Output::ChannelData(data) => {
-                    self.output_buffer.push_back(Output::Message(DataEvent {
-                        destination: *key,
-                        data,
-                    }));
+                    self.output_buffer.push_back(Output::Message(
+                        self.last_instant,
+                        DataEvent {
+                            destination: *key,
+                            data,
+                        },
+                    ));
                 }
                 rtc_connection::Output::Timeout(instant) => {
                     smallest_timeout = smallest_timeout.min(instant);

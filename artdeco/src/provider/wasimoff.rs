@@ -60,7 +60,8 @@ impl WasimoffProvider {
         self.last_instant = timeout;
     }
 
-    pub fn handle_input(&mut self, buffer: &[u8]) {
+    pub fn handle_input(&mut self, buffer: &[u8], instant: Instant) {
+        self.handle_timeout(instant);
         let envelope = Envelope::parse_from_bytes(buffer).unwrap();
         let sequence_number = envelope.sequence();
 

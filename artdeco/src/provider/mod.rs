@@ -19,7 +19,7 @@ pub struct TaskHandle {
 
 pub enum Input {
     Timeout(Instant),
-    ProviderReceive(Nanoid, Vec<u8>),
+    ProviderReceive(Instant, Nanoid, Vec<u8>),
 }
 
 pub enum Output {
@@ -46,16 +46,21 @@ impl ProviderManager {
     pub fn handle_input(&mut self, input: Input) {
         match input {
             Input::Timeout(instant) => {
-                self.last_instant = instant;
-                for (_, provider) in &mut self.wasimoff_providers {
-                    provider.handle_timeout(instant);
-                }
+                self.update_instant(instant);
             }
-            Input::ProviderReceive(nanoid, items) => {
+            Input::ProviderReceive(instant, nanoid, items) => {
+                self.update_instant(instant);
                 if let Some(provider) = self.wasimoff_providers.get_mut(&nanoid) {
-                    provider.handle_input(&items);
+                    provider.handle_input(&items, instant);
                 }
             }
+        }
+    }
+
+    fn update_instant(&mut self, instant: Instant) {
+        self.last_instant = instant;
+        for (_, provider) in &mut self.wasimoff_providers {
+            provider.handle_timeout(instant);
         }
     }
 

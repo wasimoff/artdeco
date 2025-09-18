@@ -69,16 +69,21 @@ impl<S: Scheduler> Offloader<S> {
             Input::SocketReceive(instant, receive) => {
                 self.connection_manager
                     .handle_input(connection::Input::SocketReceive(instant, receive));
+                self.update_instant(instant);
             }
             Input::Timeout(instant) => {
                 self.connection_manager
                     .handle_input(connection::Input::Timeout(instant));
-                self.provider_manager
-                    .handle_input(provider::Input::Timeout(instant));
-                self.scheduler.handle_timeout(instant);
-                self.last_instant = instant;
+                self.update_instant(instant);
             }
         }
+    }
+
+    fn update_instant(&mut self, instant: Instant) {
+        self.provider_manager
+            .handle_input(provider::Input::Timeout(instant));
+        self.scheduler.handle_timeout(instant);
+        self.last_instant = instant;
     }
 
     pub fn handle_task(&mut self, task: Task) {
@@ -118,10 +123,11 @@ impl<S: Scheduler> Offloader<S> {
 
         match self.connection_manager.poll_output() {
             connection::Output::Timeout(instant) => next_timeout = next_timeout.min(instant),
-            connection::Output::Message(data_event) => {
+            connection::Output::Message(instant, data_event) => {
                 debug!("Received data event {:?}", data_event);
                 self.provider_manager
                     .handle_input(provider::Input::ProviderReceive(
+                        instant,
                         data_event.destination,
                         data_event.data,
                     ));
