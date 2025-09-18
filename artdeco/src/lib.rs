@@ -207,7 +207,7 @@ mod test {
 
     #[test]
     fn test_candidate_serde_de() {
-        let sdp_string = r#"{"source":"5EM8N6BN9_Fuom8B-lP0C","destination":"_8Ca3Cqgd1ROkLj1p5-Ii","msg":{"Candidate":{"candidate":"a=candidate:4 1 UDP 1686109439 94.134.111.11 23154 typ srflx raddr 0.0.0.0 rport 0","sdpMLineIndex":null,"sdpMid":"7gC","usernameFragment":null}}}"#;
+        let sdp_string = r#"{"source":"5EM8N6BN9_Fuom8B-lP0C","destination":"_8Ca3Cqgd1ROkLj1p5-Ii","msg":{"Candidate":{"candidate":"candidate:4 1 UDP 1686109439 94.134.111.11 23154 typ srflx raddr 0.0.0.0 rport 0","sdpMLineIndex":null,"sdpMid":"7gC","usernameFragment":null}}}"#;
         let _sdp_message: SdpMessage = serde_json::from_str(&sdp_string).unwrap();
     }
 
