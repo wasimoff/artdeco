@@ -64,7 +64,6 @@ impl RtcConnectionManager {
             rtc_connection.connect(destination);
             self.rtc_connections.insert(destination, rtc_connection);
         }
-        // TODO maybe reconnect necessary?
     }
 
     pub fn send(&mut self, destination: Nanoid, data: &[u8]) -> anyhow::Result<()> {

@@ -1,4 +1,8 @@
-use std::{fmt::Display, net::IpAddr, time::Instant};
+use std::{
+    fmt::Display,
+    net::{IpAddr, Ipv6Addr, SocketAddr},
+    time::Instant,
+};
 
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use nid::Nanoid;
@@ -28,26 +32,30 @@ mod protobuf_gen {
 }
 
 // copied from str0m chat.rs
-pub fn select_host_address() -> IpAddr {
+pub fn local_candidates(port: u16) -> Vec<SocketAddr> {
     let system = System::new();
     let networks = system.networks().unwrap();
+    let mut addr = Vec::new();
 
     for net in networks.values() {
         for n in &net.addrs {
             if let systemstat::IpAddr::V4(v) = n.addr {
                 if !v.is_loopback() && !v.is_link_local() && !v.is_broadcast() {
-                    return IpAddr::V4(v);
+                    addr.push((IpAddr::V4(v), port).into());
                 }
             }
             if let systemstat::IpAddr::V6(v) = n.addr {
                 if !v.is_loopback() {
-                    return IpAddr::V6(v);
+                    addr.push((IpAddr::V6(v), port).into());
                 }
             }
         }
     }
 
-    panic!("Found no usable network interface");
+    if addr.is_empty() {
+        panic!("Found no usable network interface");
+    }
+    return addr;
 }
 
 pub async fn daemon<S: Sink<WorkloadResult, Error = impl Display> + Unpin>(
@@ -57,13 +65,16 @@ pub async fn daemon<S: Sink<WorkloadResult, Error = impl Display> + Unpin>(
     mut sdp_sink: impl Sink<String, Error = impl Display> + Unpin,
     scheduler: impl Scheduler,
 ) -> anyhow::Result<()> {
-    let host_addr = select_host_address();
-    let udp_socket = UdpSocket::bind(format!("{host_addr}:0")).await?;
-    let local_address = udp_socket.local_addr().unwrap();
-    info!("local address is {}", local_address);
+    let bind_addr = Ipv6Addr::UNSPECIFIED;
+    let udp_socket = UdpSocket::bind(format!("{bind_addr}:0")).await?;
+
+    let local_port = udp_socket.local_addr().unwrap().port();
+    let host_addr = local_candidates(local_port);
+    let local_addr = host_addr.first().unwrap().clone();
+    info!("local address is {}", local_addr);
 
     let rtc_config = RTCConnectionConfig {
-        local_host_addr: vec![local_address],
+        local_host_addr: host_addr,
         data_channel_name: "wasimoff".to_owned(),
         local_uuid: Nanoid::new(),
         start: Instant::now(),
@@ -166,7 +177,7 @@ pub async fn daemon<S: Sink<WorkloadResult, Error = impl Display> + Unpin>(
                                     let input = Input::SocketReceive(Instant::now(), Receive {
                                         proto: Protocol::Udp,
                                             source,
-                                            destination: local_address,
+                                            destination: local_addr,
                                             contents: datagram,
                                     });
                                     offloader.handle_input(input);
