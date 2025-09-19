@@ -7,10 +7,11 @@
     ```
 
 2. **Run the Fibonacci test**: Execute the following command in your terminal:
-    This runs `eval/fib-test` and connects to "artdeco.devpi.de"
     ```bash
     cargo run "artdeco.devpi.de"
     ```
+
+    This runs `eval/fib-test` and connects to "artdeco.devpi.de" to offload a sample task.
 
 3. **View results**: Check your terminal output to see the execution results!
 
