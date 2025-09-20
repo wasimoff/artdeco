@@ -11,14 +11,9 @@ use tracing::{debug, error, info, trace};
 
 pub enum State {
     Invalid,
-    Offer {
-        pending: SdpPendingOffer,
-        remote_uuid: Nanoid,
-    },
+    Offer { pending: SdpPendingOffer },
     Standby,
-    ChannelOpen {
-        channel_id: ChannelId,
-    },
+    ChannelOpen { channel_id: ChannelId },
 }
 
 impl Default for State {
@@ -76,6 +71,7 @@ pub struct RTCConnection {
     rtc: Rtc,
     pub config: RTCConnectionConfig,
     last: Instant,
+    remote_uuid: Nanoid,
 }
 
 #[derive(Debug, Clone)]
@@ -87,7 +83,7 @@ pub struct RTCConnectionConfig {
 }
 
 impl RTCConnection {
-    pub fn new(config: RTCConnectionConfig) -> Self {
+    pub fn new(config: RTCConnectionConfig, remote_uuid: Nanoid) -> Self {
         let buffered_outputs = VecDeque::new();
         let mut rtc = Rtc::builder().build();
         for host_addr in &config.local_host_addr {
@@ -103,43 +99,50 @@ impl RTCConnection {
             buffered_outputs,
             config,
             last: start,
+            remote_uuid,
         }
+    }
+
+    pub fn add_local_candidate(&mut self, candidate: Candidate) {
+        self.rtc.add_local_candidate(candidate.clone());
+        debug!("new candidate {}", candidate);
+        let sdp_message = SdpMessage {
+            source: self.config.local_uuid,
+            destination: self.remote_uuid,
+            msg: Sdp::Candidate(candidate),
+        };
+        self.buffered_outputs
+            .push_back(Output::SdpTransmit(sdp_message));
     }
 
     pub fn is_connected(&self) -> bool {
         self.rtc.is_connected()
     }
 
-    pub fn connect(&mut self, remote_uuid: Nanoid) {
+    pub fn connect(&mut self) {
         let mut change = self.rtc.sdp_api();
         let _channel_id = change.add_channel(self.config.data_channel_name.clone());
         let (offer, pending) = change.apply().unwrap();
         self.buffered_outputs
             .push_back(Output::SdpTransmit(SdpMessage {
-                destination: remote_uuid,
+                destination: self.remote_uuid,
                 source: self.config.local_uuid,
                 msg: Sdp::Offer(offer),
             }));
 
-        self.state = State::Offer {
-            pending,
-            remote_uuid,
-        };
+        self.state = State::Offer { pending };
     }
 
     pub fn accepts(&self, input: &Receive) -> bool {
         match &self.state {
-            State::Offer {
-                pending: _,
-                remote_uuid,
-            } => {
+            State::Offer { pending: _ } => {
                 if let Receive::Sdp(SdpMessage {
                     source,
                     destination,
                     msg: _,
                 }) = input
                 {
-                    return self.config.local_uuid == *destination && *source == *remote_uuid;
+                    return self.config.local_uuid == *destination && *source == self.remote_uuid;
                 }
             }
             State::Standby | State::ChannelOpen { channel_id: _ } => match input {
@@ -198,12 +201,8 @@ impl RTCConnection {
                     Sdp::Answer(answer) => {
                         trace!("Handle SdpAnswer: {:?}", answer);
                         let state = mem::take(&mut self.state);
-                        if let State::Offer {
-                            pending,
-                            remote_uuid,
-                        } = state
-                        {
-                            assert_eq!(remote_uuid, source);
+                        if let State::Offer { pending } = state {
+                            assert_eq!(self.remote_uuid, source);
                             if self.rtc.sdp_api().accept_answer(pending, answer).is_ok() {
                                 debug!("Connection in standby after successful SDP exchange");
                                 assert!(!self.rtc.sdp_api().has_changes());
@@ -352,7 +351,7 @@ mod test {
             local_uuid: uuid_1,
             start: Instant::now(),
         };
-        let conn_1 = RTCConnection::new(config_1);
+        let conn_1 = RTCConnection::new(config_1, uuid_2);
 
         // Create second RTCConnection instance
         let config_2 = RTCConnectionConfig {
@@ -361,7 +360,7 @@ mod test {
             local_uuid: uuid_2,
             start: Instant::now(),
         };
-        let conn_2 = RTCConnection::new(config_2);
+        let conn_2 = RTCConnection::new(config_2, uuid_1);
 
         let mut l = TestRtc {
             rtc: conn_1,
@@ -371,7 +370,7 @@ mod test {
             rtc: conn_2,
             channel_data: Vec::new(),
         };
-        l.rtc.connect(uuid_2);
+        l.rtc.connect();
 
         for _ in 0..100 {
             if l.rtc.rtc.is_connected() && r.rtc.rtc.is_connected() {

@@ -5,15 +5,15 @@ use artdeco::{
 };
 use futures::{StreamExt, channel::mpsc};
 
-use tracing::{Level, info};
+use tracing::info;
+use tracing_subscriber::EnvFilter;
 
 const FIBBONACCI_WASM: &[u8; 59778] = include_bytes!("../fibbonacci.wasm");
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let subscriber = tracing_subscriber::fmt()
-        .with_max_level(Level::DEBUG)
-        .finish();
+    let filter = EnvFilter::new("error").add_directive("artdeco=debug".parse()?);
+    let subscriber = tracing_subscriber::fmt().with_env_filter(filter).finish();
     tracing::subscriber::set_global_default(subscriber)
         .map_err(|_err| eprintln!("Unable to set global default subscriber"))
         .unwrap();

@@ -1,20 +1,19 @@
 use std::{
     fmt::Display,
-    net::{IpAddr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv6Addr, SocketAddr, ToSocketAddrs},
     time::Instant,
 };
 
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use nid::Nanoid;
 use slab::Slab;
-use str0m::net::{Protocol, Receive};
 use systemstat::{Platform, System};
 use tokio::{net::UdpSocket, time::sleep_until};
 use tracing::{debug, error, info, trace};
 
 use crate::{
     connection::rtc_connection::RTCConnectionConfig,
-    offloader::{Input, Offloader, ProviderAnnounce},
+    offloader::{Input, Offloader, ProviderAnnounce, UdpReceive},
     scheduler::Scheduler,
     task::{Workload, WorkloadResult},
 };
@@ -79,7 +78,12 @@ pub async fn daemon<S: Sink<WorkloadResult, Error = impl Display> + Unpin>(
         local_uuid: Nanoid::new(),
         start: Instant::now(),
     };
-    let mut offloader = Offloader::new(rtc_config, scheduler);
+    let google_stun_addr = "74.125.250.129:19302"
+        .to_socket_addrs()
+        .unwrap()
+        .next()
+        .unwrap();
+    let mut offloader = Offloader::new(rtc_config, scheduler, google_stun_addr);
     let mut udp_buffer = vec![0; 2000];
     let mut active_tasks: Slab<S> = Slab::new();
 
@@ -174,11 +178,10 @@ pub async fn daemon<S: Sink<WorkloadResult, Error = impl Display> + Unpin>(
                         if n > 0 {
                             match subslice.try_into() {
                                 Ok(datagram) => {
-                                    let input = Input::SocketReceive(Instant::now(), Receive {
-                                        proto: Protocol::Udp,
-                                            source,
-                                            destination: local_addr,
-                                            contents: datagram,
+                                    let input = Input::SocketReceive(Instant::now(), UdpReceive {
+                                        source,
+                                        destination: local_addr,
+                                        contents: datagram,
                                     });
                                     offloader.handle_input(input);
                                 },
