@@ -19,15 +19,14 @@ use stun_proto::agent::StunAgentPollRet;
 use stun_proto::types::TransportType;
 use stun_proto::types::attribute::XorMappedAddress;
 use stun_proto::types::message::BINDING;
-use stun_proto::types::message::IntegrityAlgorithm;
 use stun_proto::types::message::Message;
 use stun_proto::types::message::MessageWriteVec;
-use stun_proto::types::message::ShortTermCredentials;
 use stun_proto::types::message::TransactionId;
 use stun_proto::types::prelude::MessageWrite;
 use stun_proto::types::prelude::MessageWriteExt;
 use tracing::debug;
 use tracing::info;
+use tracing::trace;
 
 use crate::connection::rtc_connection::SdpMessage;
 use crate::offloader;
@@ -76,9 +75,9 @@ pub struct RtcConnectionManager {
     last_instant: Instant,
     stun_agent: StunAgent,
     stun_transactions: HashMap<TransactionId, Nanoid>,
-    local_credentials: ShortTermCredentials,
     stun_server: SocketAddr,
     local_addr: SocketAddr,
+    base_instant: std::time::Instant,
 }
 
 impl RtcConnectionManager {
@@ -86,7 +85,7 @@ impl RtcConnectionManager {
         let local_addr = rtc_config.local_host_addr[0];
         let agent = StunAgent::builder(TransportType::Udp, local_addr).build();
 
-        let random_12_string: String = (0..12).map(|_| fastrand::alphanumeric()).collect();
+        let base_instant = rtc_config.start;
         Self {
             rtc_connections: HashMap::new(),
             default_rtc_config: rtc_config,
@@ -94,24 +93,23 @@ impl RtcConnectionManager {
             last_instant: Instant::now(),
             stun_agent: agent,
             stun_transactions: HashMap::new(),
-            local_credentials: ShortTermCredentials::new(random_12_string),
             stun_server,
             local_addr,
+            base_instant,
         }
     }
 
     fn new_stun_request(&mut self, con: Nanoid) {
-        let mut msg = Message::builder_request(BINDING, MessageWriteVec::new());
-        msg.add_message_integrity(
-            &self.local_credentials.clone().into(),
-            IntegrityAlgorithm::Sha256,
-        )
-        .unwrap();
+        let msg = Message::builder_request(BINDING, MessageWriteVec::new());
         let transaction_id = msg.transaction_id();
-        info!("new stun transaction {}", transaction_id);
+        trace!("new stun transaction {}", transaction_id);
         let _transmit = self
             .stun_agent
-            .send_request(msg.finish(), self.stun_server, self.last_instant)
+            .send_request(
+                msg.finish(),
+                self.stun_server,
+                from_std(self.base_instant, self.last_instant),
+            )
             .unwrap();
         self.stun_transactions.insert(transaction_id, con);
         // no need to put transmit into queue since it will be added with the next poll_output anyway
@@ -121,7 +119,7 @@ impl RtcConnectionManager {
         let transaction_id = message.transaction_id();
 
         if let Some(connection_id) = self.stun_transactions.remove(&transaction_id) {
-            debug!("removing transaction {}", transaction_id);
+            trace!("removing transaction {}", transaction_id);
             if let Some(connection) = self.rtc_connections.get_mut(&connection_id) {
                 // Extract mapped address from STUN response
                 message
@@ -141,7 +139,7 @@ impl RtcConnectionManager {
             }
         } else {
             debug!(
-                "Received STUN response for unknown transaction: {}, message: {:?}",
+                "Received STUN response for unknown transaction: {}, message: {}",
                 transaction_id, message
             );
         }
@@ -179,6 +177,7 @@ impl RtcConnectionManager {
     pub fn handle_input(&mut self, input: Input) {
         let Input { inner, instant } = input;
         self.last_instant = instant;
+
         match inner {
             InputInner::SocketReceive(receive) => {
                 let UdpReceive {
@@ -192,7 +191,7 @@ impl RtcConnectionManager {
                         match self.stun_agent.handle_stun(message, source) {
                             HandleStunReply::Drop(message)
                             | HandleStunReply::IncomingStun(message) => {
-                                info!("forwarding stun");
+                                trace!("forwarding stun");
                                 let datagram_recv =
                                     DatagramRecv::try_from(message.as_bytes()).unwrap();
                                 let input = InputInner::SocketReceive(UdpReceive {
@@ -295,20 +294,21 @@ impl RtcConnectionManager {
             }
         }
 
-        match self.stun_agent.poll(self.last_instant) {
+        let last_instant = from_std(self.base_instant, self.last_instant);
+        match self.stun_agent.poll(last_instant) {
             StunAgentPollRet::TransactionTimedOut(transaction_id)
             | StunAgentPollRet::TransactionCancelled(transaction_id) => {
                 self.stun_transactions.remove(&transaction_id);
             }
             StunAgentPollRet::WaitUntil(instant) => {
-                if self.last_instant >= instant
-                    && let Some(transmit) = self.stun_agent.poll_transmit(self.last_instant)
+                if last_instant >= instant
+                    && let Some(transmit) = self.stun_agent.poll_transmit(last_instant)
                 {
-                    debug!("new stun transmission");
+                    trace!("new stun transmission");
                     self.output_buffer
                         .push_back(Output::UdpTransmit(transmit.into()));
                 } else {
-                    smallest_timeout = smallest_timeout.min(instant)
+                    smallest_timeout = smallest_timeout.min(to_std(last_instant, self.base_instant))
                 }
             }
         }
@@ -317,4 +317,26 @@ impl RtcConnectionManager {
             .pop_front()
             .unwrap_or(Output::Timeout(smallest_timeout))
     }
+}
+
+fn to_std(
+    sans_io_instant: sans_io_time::Instant,
+    base_instant: ::std::time::Instant,
+) -> ::std::time::Instant {
+    let duration_since = ::core::time::Duration::from_nanos(
+        sans_io_instant
+            .as_nanos()
+            .try_into()
+            .expect("Elapsed time too large to fit into Duration"),
+    );
+    base_instant + duration_since
+}
+
+fn from_std(
+    base_instant: ::std::time::Instant,
+    target_instant: ::std::time::Instant,
+) -> sans_io_time::Instant {
+    let duration_since = target_instant - base_instant;
+    let sans_io_time = sans_io_time::Instant::from_std(base_instant);
+    sans_io_time + duration_since
 }

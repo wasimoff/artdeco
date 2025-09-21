@@ -170,6 +170,7 @@ impl<S: Scheduler> Offloader<S> {
 
     pub fn handle_announce(&mut self, announce: ProviderAnnounce) {
         self.scheduler.handle_announce(announce);
+        //self.handle_input(input);
     }
 
     pub fn handle_input(&mut self, input: Input) {
@@ -239,7 +240,7 @@ impl<S: Scheduler> Offloader<S> {
         match self.connection_manager.poll_output() {
             connection::Output::Timeout(instant) => next_timeout = next_timeout.min(instant),
             connection::Output::Message(instant, data_event) => {
-                debug!("Received data event {:?}", data_event);
+                trace!("Received data event {:?}", data_event);
                 self.provider_manager
                     .handle_input(provider::Input::ProviderReceive(
                         instant,

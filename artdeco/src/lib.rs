@@ -126,7 +126,7 @@ pub async fn daemon<S: Sink<WorkloadResult, Error = impl Display> + Unpin>(
             // poll task queue
             task = fused_task_queue.next() => {
                 if let Some(next_task) = task {
-                    debug!("task queue new task");
+                    trace!("task queue new task");
                     // offload task using offloader
                     // deconstruct Workload, insert channel into slab, create new task
                     let task = next_task.to_task(&mut active_tasks);
@@ -137,7 +137,7 @@ pub async fn daemon<S: Sink<WorkloadResult, Error = impl Display> + Unpin>(
             announce = provider_stream.next() => {
                 if let Some(announce_str) = announce {
                     let announce_str: String = announce_str;
-                    debug!("announce stream event {:?}", announce_str);
+                    trace!("announce stream event {:?}", announce_str);
                     match serde_json::from_str(&announce_str) {
                         Ok(announce_msg_parsed) => {
                             let pa = ProviderAnnounce {
@@ -157,7 +157,7 @@ pub async fn daemon<S: Sink<WorkloadResult, Error = impl Display> + Unpin>(
             sdp_message = sdp_stream.next() => {
                 if let Some(sdp_message_str) = sdp_message {
                     let sdp_message_str: String = sdp_message_str;
-                    debug!("sdp stream event {:?}", sdp_message_str);
+                    trace!("sdp stream event {:?}", sdp_message_str);
                     match serde_json::from_str(&sdp_message_str) {
                         Ok(sdp_msg_parsed) => {
                             offloader.handle_sdp(sdp_msg_parsed);

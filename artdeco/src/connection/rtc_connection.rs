@@ -163,7 +163,7 @@ impl RTCConnection {
                 error!("Cannot send data in invalid state");
             }
             State::ChannelOpen { channel_id } => {
-                debug!("writing to rtc datachannel");
+                trace!("writing to rtc datachannel");
                 if let Err(e) = self.rtc.channel(channel_id).unwrap().write(true, data) {
                     error!("Failed to send data to channel: {:?}", e);
                 }
@@ -265,7 +265,7 @@ impl RTCConnection {
                             self.buffered_outputs.push_back(Output::ChannelClosed);
                         }
                     }
-                    _ => debug!("received unprocessed event: {:?}", event),
+                    _ => trace!("received unprocessed event: {:?}", event),
                 }
             }
         }

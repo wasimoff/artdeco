@@ -46,6 +46,7 @@ dependencies = [
  "protobuf 3.7.2",
  "protobuf-codegen 3.7.2",
  "protoc-rust",
+ "sans-io-time",
  "serde",
  "serde_json",
  "sha2",
@@ -1612,6 +1613,7 @@ dependencies = [
 [[package]]
 name = "stun-proto"
 version = "1.0.0-alpha3"
+source = "git+https://github.com/lehmanju/stun-proto?rev=7232216874610925d353073cca849569180ac04d#7232216874610925d353073cca849569180ac04d"
 dependencies = [
  "byteorder",
  "sans-io-time",
@@ -1623,6 +1625,7 @@ dependencies = [
 [[package]]
 name = "stun-types"
 version = "1.0.0-alpha3"
+source = "git+https://github.com/lehmanju/stun-proto?rev=7232216874610925d353073cca849569180ac04d#7232216874610925d353073cca849569180ac04d"
 dependencies = [
  "byteorder",
  "crc",
