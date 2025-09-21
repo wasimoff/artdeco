@@ -4,7 +4,7 @@ use async_nats::{PublishMessage, Subject, ToServerAddrs};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use tracing::debug;
 
-use crate::{Workload, daemon, scheduler::Scheduler, task::WorkloadResult};
+use crate::{daemon::generic::daemon, scheduler::Scheduler, task::Workload, task::WorkloadResult};
 
 pub async fn daemon_nats<S: Sink<WorkloadResult, Error = impl Display> + Unpin>(
     task_queue: impl Stream<Item = Workload<S>> + Unpin,

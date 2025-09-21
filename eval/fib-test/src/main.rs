@@ -1,5 +1,5 @@
 use artdeco::{
-    nats::daemon_nats,
+    daemon::nats::daemon_nats,
     scheduler::fixed::Fixed,
     task::{TaskExecutable, Workload},
 };
