@@ -22,19 +22,19 @@ pub enum Input {
     ProviderReceive(Instant, Nanoid, Vec<u8>),
 }
 
-pub enum Output {
-    TaskResult(Nanoid, TaskResult),
+pub enum Output<M> {
+    TaskResult(Nanoid, TaskResult<M>),
     ProviderTransmit(Nanoid, Vec<u8>),
     Timeout(Instant),
 }
 
-pub struct ProviderManager {
-    wasimoff_providers: HashMap<Nanoid, WasimoffProvider>,
-    output_buffer: VecDeque<Output>,
+pub struct ProviderManager<M> {
+    wasimoff_providers: HashMap<Nanoid, WasimoffProvider<M>>,
+    output_buffer: VecDeque<Output<M>>,
     last_instant: Instant,
 }
 
-impl ProviderManager {
+impl<M> ProviderManager<M> {
     pub fn new() -> Self {
         Self {
             wasimoff_providers: HashMap::new(),
@@ -64,7 +64,7 @@ impl ProviderManager {
         }
     }
 
-    pub fn offload(&mut self, task: Task, destination: Nanoid) {
+    pub fn offload(&mut self, task: Task<M>, destination: Nanoid) {
         if let Some(provider) = self.wasimoff_providers.get_mut(&destination) {
             provider.offload(task);
         }
@@ -80,7 +80,7 @@ impl ProviderManager {
         }
     }
 
-    pub fn poll_output(&mut self) -> Output {
+    pub fn poll_output(&mut self) -> Output<M> {
         let mut smallest_timeout = self.last_instant + Duration::from_secs(10);
 
         for (id, provider) in &mut self.wasimoff_providers {

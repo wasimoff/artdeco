@@ -1,5 +1,5 @@
 use std::{
-    fmt::Display,
+    fmt::{Debug, Display},
     net::{IpAddr, Ipv6Addr, SocketAddr, ToSocketAddrs},
     time::Instant,
 };
@@ -15,7 +15,7 @@ use crate::{
     connection::rtc_connection::RTCConnectionConfig,
     offloader::{self, Input, Offloader, ProviderAnnounce, UdpReceive},
     scheduler::Scheduler,
-    task::{Workload, WorkloadResult},
+    task::{AssociatedData, Workload, WorkloadResult},
 };
 
 // copied from str0m chat.rs
@@ -45,12 +45,12 @@ pub fn local_candidates(port: u16) -> Vec<SocketAddr> {
     return addr;
 }
 
-pub async fn daemon<S: Sink<WorkloadResult, Error = impl Display> + Unpin>(
-    task_queue: impl Stream<Item = Workload<S>> + Unpin,
+pub async fn daemon<D, M: Debug, S: Sink<WorkloadResult<D, M>, Error = impl Display> + Unpin>(
+    task_queue: impl Stream<Item = Workload<S, D, M>> + Unpin,
     mut provider_stream: impl Stream<Item = String> + Unpin,
     mut sdp_stream: impl Stream<Item = String> + Unpin,
     mut sdp_sink: impl Sink<String, Error = impl Display> + Unpin,
-    scheduler: impl Scheduler,
+    scheduler: impl Scheduler<M>,
 ) -> anyhow::Result<()> {
     let bind_addr = Ipv6Addr::UNSPECIFIED;
     let udp_socket = UdpSocket::bind(format!("{bind_addr}:0")).await?;
@@ -73,7 +73,7 @@ pub async fn daemon<S: Sink<WorkloadResult, Error = impl Display> + Unpin>(
         .unwrap();
     let mut offloader = Offloader::new(rtc_config, scheduler, google_stun_addr);
     let mut udp_buffer = vec![0; 2000];
-    let mut active_tasks: Slab<S> = Slab::new();
+    let mut active_tasks: Slab<AssociatedData<S, D>> = Slab::new();
 
     let mut fused_task_queue = task_queue.fuse();
 

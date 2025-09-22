@@ -11,7 +11,7 @@ use str0m::{
     net::{Protocol, Transmit},
 };
 use stun_proto::types::{TransportType, message};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace};
 
 use crate::{
     connection::{
@@ -128,11 +128,11 @@ pub struct UdpTransmit {
     pub contents: Vec<u8>,
 }
 
-pub enum Output {
+pub enum Output<M> {
     Timeout(Instant),
     SocketTransmit(UdpTransmit),
     SdpTransmit(String),
-    TaskResult(TaskResult),
+    TaskResult(TaskResult<M>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -147,14 +147,14 @@ pub struct ProviderAnnounce {
     pub last: Instant,
 }
 
-pub struct Offloader<S> {
+pub struct Offloader<S, M> {
     connection_manager: RtcConnectionManager,
-    provider_manager: ProviderManager,
+    provider_manager: ProviderManager<M>,
     scheduler: S,
     last_instant: Instant,
 }
 
-impl<S: Scheduler> Offloader<S> {
+impl<M, S: Scheduler<M>> Offloader<S, M> {
     pub fn new(rtc_config: RTCConnectionConfig, scheduler: S, stun_server: SocketAddr) -> Self {
         Self {
             connection_manager: RtcConnectionManager::new(rtc_config, stun_server),
@@ -199,12 +199,12 @@ impl<S: Scheduler> Offloader<S> {
         self.last_instant = instant;
     }
 
-    pub fn handle_task(&mut self, task: Task) {
+    pub fn handle_task(&mut self, task: Task<M>) {
         info!("scheduling task");
         self.scheduler.schedule(task);
     }
 
-    pub fn poll_output(&mut self) -> Output {
+    pub fn poll_output(&mut self) -> Output<M> {
         let mut next_timeout = *TIMEOUT;
         match self.scheduler.poll_output() {
             scheduler::Output::Timeout(instant) => next_timeout = next_timeout.min(instant),

@@ -24,27 +24,27 @@ pub struct WasimoffConfig {
     pub client_identifier: Nanoid,
 }
 
-pub struct WasimoffProvider {
+pub struct WasimoffProvider<M> {
     config: WasimoffConfig,
-    pending_outputs: VecDeque<Output>,
+    pending_outputs: VecDeque<Output<M>>,
     next_sequence: u64,
-    active_offloads: HashMap<u64, ActiveTask>,
+    active_offloads: HashMap<u64, ActiveTask<M>>,
     remote_files: HashSet<String>,
     last_instant: Instant,
 }
 
-pub enum Output {
+pub enum Output<M> {
     Transmit(Vec<u8>),
-    TaskResult(TaskResult),
+    TaskResult(TaskResult<M>),
     Timeout(Instant),
 }
 
-struct ActiveTask {
-    metrics: TaskMetrics,
+struct ActiveTask<M> {
+    metrics: TaskMetrics<M>,
     id: TaskId,
 }
 
-impl WasimoffProvider {
+impl<M> WasimoffProvider<M> {
     pub fn new(config: WasimoffConfig) -> Self {
         Self {
             config,
@@ -119,7 +119,7 @@ impl WasimoffProvider {
         }
     }
 
-    pub fn poll_output(&mut self) -> Output {
+    pub fn poll_output(&mut self) -> Output<M> {
         if !self.pending_outputs.is_empty() {
             self.pending_outputs.pop_front().unwrap()
         } else {
@@ -136,12 +136,13 @@ impl WasimoffProvider {
         envelope
     }
 
-    pub fn offload(&mut self, task: Task) {
+    pub fn offload(&mut self, task: Task<M>) {
         let Task {
             executable,
             args,
             id,
             metrics,
+            deadline,
         } = task;
         let mut offload_message = wasip1::Request::new();
 
@@ -187,15 +188,15 @@ impl WasimoffProvider {
     }
 }
 
-impl PartialEq for WasimoffProvider {
+impl<D> PartialEq for WasimoffProvider<D> {
     fn eq(&self, other: &Self) -> bool {
         self.config == other.config
     }
 }
 
-impl Eq for WasimoffProvider {}
+impl<D> Eq for WasimoffProvider<D> {}
 
-impl std::hash::Hash for WasimoffProvider {
+impl<D> std::hash::Hash for WasimoffProvider<D> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.config.hash(state);
     }
