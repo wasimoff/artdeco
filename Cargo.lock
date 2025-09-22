@@ -1612,8 +1612,9 @@ dependencies = [
 
 [[package]]
 name = "stun-proto"
-version = "1.0.0-alpha3"
-source = "git+https://github.com/lehmanju/stun-proto?rev=7232216874610925d353073cca849569180ac04d#7232216874610925d353073cca849569180ac04d"
+version = "1.0.0-alpha4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6847ddbf3973928b69d727fc2c7ecb02589519bf8c0e147b02d1afc1045bccd"
 dependencies = [
  "byteorder",
  "sans-io-time",
@@ -1624,8 +1625,9 @@ dependencies = [
 
 [[package]]
 name = "stun-types"
-version = "1.0.0-alpha3"
-source = "git+https://github.com/lehmanju/stun-proto?rev=7232216874610925d353073cca849569180ac04d#7232216874610925d353073cca849569180ac04d"
+version = "1.0.0-alpha4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e26c0c2f44cd66bbd02fc941b3897039e4676a5f00d761fde1014f4ecd0291d0"
 dependencies = [
  "byteorder",
  "crc",
