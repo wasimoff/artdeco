@@ -1,9 +1,15 @@
-use std::{marker::PhantomData, time::SystemTime};
+use std::{
+    marker::PhantomData,
+    time::{Duration, SystemTime},
+};
 
 use bytes::Bytes;
 use futures::Sink;
+use nid::Nanoid;
 use sha2::{Digest, Sha256};
 use slab::Slab;
+
+use crate::protocol::wasimoff;
 
 #[derive(Debug, Clone)]
 pub struct TaskExecutable {
@@ -50,15 +56,40 @@ pub struct Task<M> {
     pub metrics: TaskMetrics<M>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct TaskMetrics<M> {
+    pub executor_id: Option<Nanoid>,
+    pub trace: Vec<TraceEvent<M>>,
+    pub duration: Duration,
+}
+
 #[derive(Debug, Clone)]
-pub struct TaskMetrics<D> {
-    phantom_data: PhantomData<D>, /*pub(crate) creation_timestamp: Instant,
-                                  pub(crate) scheduling_timestamp: Vec<Instant>,
-                                  pub(crate) sending_timestamp: Instant,
-                                  pub(crate) receiving_timestamp: Instant,
-                                  // retry counter
-                                  // local queue instants
-                                  pub(crate) result_timestamp: Instant,*/
+pub enum TraceEvent<M> {
+    External(Vec<u8>),
+    Scheduler(M),
+    // other events
+}
+
+pub trait WasimoffTraceEvent {
+    fn to_wasimoff(&self) -> Option<wasimoff::task::TraceEvent>;
+}
+
+impl WasimoffTraceEvent for () {
+    fn to_wasimoff(&self) -> Option<wasimoff::task::TraceEvent> {
+        None
+    }
+}
+
+impl<M> WasimoffTraceEvent for TraceEvent<M>
+where
+    M: WasimoffTraceEvent,
+{
+    fn to_wasimoff(&self) -> Option<wasimoff::task::TraceEvent> {
+        match self {
+            TraceEvent::External(_items) => None,
+            TraceEvent::Scheduler(scheduler_event) => scheduler_event.to_wasimoff(),
+        }
+    }
 }
 
 pub struct Workload<S, D, M> {
@@ -75,7 +106,7 @@ pub(crate) struct AssociatedData<S, D> {
     pub custom_data: D,
 }
 
-impl<M, D, S: Sink<WorkloadResult<D, M>>> Workload<S, D, M> {
+impl<M: Default, D, S: Sink<WorkloadResult<D, M>>> Workload<S, D, M> {
     pub(crate) fn to_task(self, slab: &mut Slab<AssociatedData<S, D>>) -> Task<M> {
         let Self {
             executable,
@@ -93,9 +124,7 @@ impl<M, D, S: Sink<WorkloadResult<D, M>>> Workload<S, D, M> {
             executable,
             args,
             id: TaskId::Consumer(id),
-            metrics: TaskMetrics {
-                phantom_data: PhantomData,
-            },
+            metrics: TaskMetrics::default(),
             deadline,
         }
     }

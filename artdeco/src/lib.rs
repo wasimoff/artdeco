@@ -1,13 +1,10 @@
 pub mod connection;
 pub mod daemon;
 pub mod offloader;
+pub mod protocol;
 pub mod provider;
 pub mod scheduler;
 pub mod task;
-
-mod protobuf_gen {
-    include!(concat!(env!("OUT_DIR"), "/protos/mod.rs"));
-}
 
 #[cfg(test)]
 mod test {

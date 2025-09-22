@@ -7,15 +7,15 @@ use nid::Nanoid;
 use protobuf::{Message, MessageField, MessageFull, well_known_types::any::Any};
 use tracing::{debug, error};
 
-use crate::{protobuf_gen::wasimoff, task::Task};
-use crate::{protobuf_gen::wasimoff::Envelope, provider::TaskMetrics};
-use crate::{protobuf_gen::wasimoff::envelope::MessageType, task::TaskResult};
+use crate::{protocol::wasimoff, task::Task};
+use crate::{protocol::wasimoff::Envelope, provider::TaskMetrics};
+use crate::{protocol::wasimoff::envelope::MessageType, task::TaskResult};
 use crate::{
-    protobuf_gen::wasimoff::task::wasip1::{self},
+    protocol::wasimoff::task::wasip1::{self},
     task::Status,
 };
 use crate::{
-    protobuf_gen::wasimoff::task::{self, QoS},
+    protocol::wasimoff::task::{self, QoS},
     task::TaskId,
 };
 
@@ -142,7 +142,7 @@ impl<M> WasimoffProvider<M> {
             args,
             id,
             metrics,
-            deadline,
+            deadline: _,
         } = task;
         let mut offload_message = wasip1::Request::new();
 
@@ -206,7 +206,7 @@ impl<D> std::hash::Hash for WasimoffProvider<D> {
 mod test {
     use protobuf::Message;
 
-    use crate::protobuf_gen::wasimoff::Envelope;
+    use crate::protocol::wasimoff::Envelope;
 
     #[test]
     fn test_upload_msg() {

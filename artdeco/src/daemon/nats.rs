@@ -8,7 +8,7 @@ use crate::{daemon::generic::daemon, scheduler::Scheduler, task::Workload, task:
 
 pub async fn daemon_nats<
     D,
-    M: Debug,
+    M: Debug + Default,
     S: Sink<WorkloadResult<D, M>, Error = impl Display> + Unpin,
 >(
     task_queue: impl Stream<Item = Workload<S, D, M>> + Unpin,

@@ -45,7 +45,11 @@ pub fn local_candidates(port: u16) -> Vec<SocketAddr> {
     return addr;
 }
 
-pub async fn daemon<D, M: Debug, S: Sink<WorkloadResult<D, M>, Error = impl Display> + Unpin>(
+pub async fn daemon<
+    D,
+    M: Debug + Default,
+    S: Sink<WorkloadResult<D, M>, Error = impl Display> + Unpin,
+>(
     task_queue: impl Stream<Item = Workload<S, D, M>> + Unpin,
     mut provider_stream: impl Stream<Item = String> + Unpin,
     mut sdp_stream: impl Stream<Item = String> + Unpin,
