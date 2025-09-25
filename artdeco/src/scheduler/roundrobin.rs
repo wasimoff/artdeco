@@ -9,6 +9,7 @@ use std::time::Instant;
 
 #[derive(Clone)]
 struct ProviderInfo {
+    #[allow(dead_code)]
     announce: ProviderAnnounce,
     state: ProviderState,
 }
@@ -22,7 +23,7 @@ pub struct SchedulerRoundRobin {
 
 impl SchedulerRoundRobin {
     pub fn new() -> Self {
-        SchedulerRoundRobin { 
+        SchedulerRoundRobin {
             last_id: None,
             providers: HashMap::new(),
             pending_tasks: VecDeque::new(),
@@ -78,11 +79,13 @@ impl SchedulerRoundRobin {
             if let Some(provider_id) = self.get_next_provider() {
                 if self.is_provider_connected(&provider_id) {
                     // Provider is connected, schedule the task directly
-                    self.event_buffer.push_back(Output::Offload(provider_id, task));
+                    self.event_buffer
+                        .push_back(Output::Offload(provider_id, task));
                 } else {
                     // Provider is not connected, connect first then schedule
                     self.event_buffer.push_back(Output::Connect(provider_id));
-                    self.event_buffer.push_back(Output::Offload(provider_id, task));
+                    self.event_buffer
+                        .push_back(Output::Offload(provider_id, task));
                 }
             } else {
                 // No providers available, put the task back and break
@@ -93,6 +96,7 @@ impl SchedulerRoundRobin {
     }
 }
 
+#[derive(Default)]
 pub struct RoundRobinMetrics {}
 
 impl Scheduler<RoundRobinMetrics> for SchedulerRoundRobin {
@@ -109,7 +113,7 @@ impl Scheduler<RoundRobinMetrics> for SchedulerRoundRobin {
             state: ProviderState::Disconnected, // Default state for new announcements
         };
         self.providers.insert(provider_id, provider_info);
-        
+
         // Process any pending tasks since we have a new provider
         self.process_pending_tasks();
     }
@@ -123,7 +127,7 @@ impl Scheduler<RoundRobinMetrics> for SchedulerRoundRobin {
         // Update the provider state if the provider exists
         if let Some(provider_info) = self.providers.get_mut(&uuid) {
             provider_info.state = provider_state;
-            
+
             // If a provider just connected, try to process pending tasks
             if matches!(provider_info.state, ProviderState::Connected) {
                 self.process_pending_tasks();
@@ -155,8 +159,91 @@ impl Scheduler<RoundRobinMetrics> for SchedulerRoundRobin {
     fn schedule(&mut self, task: Task<RoundRobinMetrics>) {
         // Add the task to our pending queue
         self.pending_tasks.push_back(task);
-        
+
         // Try to process it immediately
         self.process_pending_tasks();
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{
+        offloader::ProviderAnnounceMsg,
+        scheduler::{Output, ProviderState, Scheduler},
+        task::{Task, TaskExecutable, TaskId, TaskMetrics},
+    };
+    use nid::Nanoid;
+    use std::time::SystemTime;
+
+    #[test]
+    fn test_roundrobin() {
+        let mut scheduler = SchedulerRoundRobin::new();
+
+        // Create 3 test providers
+        let providers = [Nanoid::new(), Nanoid::new(), Nanoid::new()];
+
+        // Announce and connect all providers
+        for &provider_id in &providers {
+            let announce = ProviderAnnounce {
+                announce: ProviderAnnounceMsg { id: provider_id },
+                last: Instant::now(),
+            };
+            scheduler.handle_announce(announce);
+            scheduler.handle_provider_state(provider_id, ProviderState::Connected, Instant::now());
+        }
+
+        let executable = TaskExecutable::new("test5".as_bytes());
+
+        // Create and schedule 4 tasks
+        for i in 1..=4 {
+            let task = Task {
+                id: TaskId::Consumer(i),
+                executable: executable.clone(),
+                args: vec![format!("arg{}", i)],
+                deadline: Some(SystemTime::now() + std::time::Duration::from_secs(60)),
+                metrics: TaskMetrics::<RoundRobinMetrics>::default(),
+            };
+            scheduler.schedule(task);
+        }
+
+        // Collect offload events
+        let mut offload_events = Vec::new();
+        while let Output::Offload(provider_id, _task) = scheduler.poll_output() {
+            offload_events.push(provider_id);
+            if offload_events.len() == 4 {
+                break;
+            }
+        }
+
+        // Verify round-robin distribution
+        let mut sorted_providers = providers.to_vec();
+        sorted_providers.sort_by_key(|id| id.to_string());
+
+        assert_eq!(offload_events.len(), 4);
+        assert_eq!(offload_events[0], sorted_providers[0]); // Task 1 -> Provider 1
+        assert_eq!(offload_events[1], sorted_providers[1]); // Task 2 -> Provider 2
+        assert_eq!(offload_events[2], sorted_providers[2]); // Task 3 -> Provider 3
+        assert_eq!(offload_events[3], sorted_providers[0]); // Task 4 -> Provider 1 (wrap around)
+
+        // Test disconnected provider behavior
+        scheduler.handle_provider_state(
+            sorted_providers[1],
+            ProviderState::Disconnected,
+            Instant::now(),
+        );
+
+        let task5 = Task {
+            id: TaskId::Consumer(5),
+            executable: executable.clone(),
+            args: vec!["arg5".to_string()],
+            deadline: Some(SystemTime::now() + std::time::Duration::from_secs(60)),
+            metrics: TaskMetrics::<RoundRobinMetrics>::default(),
+        };
+        scheduler.schedule(task5);
+
+        // Should generate Connect then Offload for disconnected provider
+        assert!(matches!(scheduler.poll_output(), Output::Connect(_)));
+        assert!(matches!(scheduler.poll_output(), Output::Offload(_, _)));
     }
 }
