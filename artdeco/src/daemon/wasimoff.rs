@@ -41,7 +41,7 @@ pub async fn wasimoff_broker<M: WasimoffTraceEvent + Debug + Send + Default + 's
     mut socket: impl AsyncRead + AsyncWrite + Unpin,
     scheduler: impl Scheduler<M> + Send + 'static,
     nats_url: impl ToServerAddrs + Send + 'static,
-    executables: &HashMap<&str, TaskExecutable>,
+    executables: &HashMap<String, TaskExecutable>,
 ) -> Result<()> {
     info!("Starting wasimoff broker");
 
@@ -83,7 +83,7 @@ async fn read_from_socket<M: WasimoffTraceEvent>(
     buffer: &[u8],
     task_queue: &mut Sender<Workload<Sender<WorkloadResult<CustomData, M>>, CustomData, M>>,
     back_channel: Sender<WorkloadResult<CustomData, M>>,
-    task_executables: &HashMap<&str, TaskExecutable>,
+    task_executables: &HashMap<String, TaskExecutable>,
 ) {
     match Envelope::parse_from_bytes(buffer) {
         Ok(envelope) => match envelope.payload.unpack::<wasip1::Request>() {

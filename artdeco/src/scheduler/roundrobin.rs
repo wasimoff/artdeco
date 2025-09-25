@@ -1,7 +1,7 @@
 use crate::{
     offloader::ProviderAnnounce,
     scheduler::{Output, ProviderState, Scheduler},
-    task::{Task, TaskResult},
+    task::{Task, TaskResult, WasimoffTraceEvent},
 };
 use nid::Nanoid;
 use std::collections::{HashMap, VecDeque};
@@ -14,16 +14,16 @@ struct ProviderInfo {
     state: ProviderState,
 }
 
-pub struct SchedulerRoundRobin {
+pub struct RoundRobin {
     last_id: Option<Nanoid>,
     providers: HashMap<Nanoid, ProviderInfo>,
     pending_tasks: VecDeque<Task<RoundRobinMetrics>>,
     event_buffer: VecDeque<Output<RoundRobinMetrics>>,
 }
 
-impl SchedulerRoundRobin {
+impl RoundRobin {
     pub fn new() -> Self {
-        SchedulerRoundRobin {
+        RoundRobin {
             last_id: None,
             providers: HashMap::new(),
             pending_tasks: VecDeque::new(),
@@ -96,10 +96,16 @@ impl SchedulerRoundRobin {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct RoundRobinMetrics {}
 
-impl Scheduler<RoundRobinMetrics> for SchedulerRoundRobin {
+impl WasimoffTraceEvent for RoundRobinMetrics {
+    fn to_wasimoff(&self) -> Option<crate::protocol::wasimoff::task::TraceEvent> {
+        None
+    }
+}
+
+impl Scheduler<RoundRobinMetrics> for RoundRobin {
     fn handle_timeout(&mut self, _instant: Instant) {
         // Process any pending tasks when we get a timeout
         self.process_pending_tasks();
@@ -178,7 +184,7 @@ mod test {
 
     #[test]
     fn test_roundrobin() {
-        let mut scheduler = SchedulerRoundRobin::new();
+        let mut scheduler = RoundRobin::new();
 
         // Create 3 test providers
         let providers = [Nanoid::new(), Nanoid::new(), Nanoid::new()];
