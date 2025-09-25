@@ -256,13 +256,19 @@ impl<M, S: Scheduler<M>> Offloader<S, M> {
                 return Output::SocketTransmit(transmit);
             }
             connection::Output::ChannelOpen(nanoid) => {
-                self.scheduler
-                    .handle_provider_state(nanoid, ProviderState::Connected);
+                self.scheduler.handle_provider_state(
+                    nanoid,
+                    ProviderState::Connected,
+                    self.last_instant,
+                );
                 return Output::Timeout(self.last_instant);
             }
             connection::Output::ChannelClosed(nanoid) => {
-                self.scheduler
-                    .handle_provider_state(nanoid, ProviderState::Disconnected);
+                self.scheduler.handle_provider_state(
+                    nanoid,
+                    ProviderState::Disconnected,
+                    self.last_instant,
+                );
                 return Output::Timeout(self.last_instant);
             }
         }

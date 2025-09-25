@@ -11,6 +11,7 @@ pub mod bandit;
 pub mod fixed;
 pub mod roundrobin;
 
+#[derive(Clone)]
 pub enum ProviderState {
     Connected,
     Disconnected,
@@ -38,7 +39,7 @@ pub trait Scheduler<M> {
     /// Provider state update.
     ///
     /// Connected/Disconnected/Failure events
-    fn handle_provider_state(&mut self, uuid: Nanoid, provider_state: ProviderState);
+    fn handle_provider_state(&mut self, uuid: Nanoid, provider_state: ProviderState, instant: Instant);
 
     fn handle_taskresult(
         &mut self,

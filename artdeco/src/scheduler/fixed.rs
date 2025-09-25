@@ -36,7 +36,12 @@ impl Scheduler<()> for Fixed {
         }
     }
 
-    fn handle_provider_state(&mut self, uuid: Nanoid, provider_state: super::ProviderState) {
+    fn handle_provider_state(
+        &mut self,
+        uuid: Nanoid,
+        provider_state: super::ProviderState,
+        instant: std::time::Instant,
+    ) {
         if self.fixed_uuid.is_some_and(|fixed_id| fixed_id == uuid)
             && matches!(provider_state, super::ProviderState::Connected)
         {
