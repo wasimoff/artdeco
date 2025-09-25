@@ -55,14 +55,11 @@ async fn main() {
         Scheduler::Fixed => wasimoff_broker(socket, Fixed::new(), args.broker_url, &binaries)
             .await
             .unwrap(),
-        Scheduler::RoundRobin => wasimoff_broker(
-            socket,
-            RoundRobin::new(),
-            args.broker_url,
-            &binaries,
-        )
-        .await
-        .unwrap(),
+        Scheduler::RoundRobin => {
+            wasimoff_broker(socket, RoundRobin::new(), args.broker_url, &binaries)
+                .await
+                .unwrap()
+        }
     }
 }
 

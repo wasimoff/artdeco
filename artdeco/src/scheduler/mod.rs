@@ -39,7 +39,12 @@ pub trait Scheduler<M> {
     /// Provider state update.
     ///
     /// Connected/Disconnected/Failure events
-    fn handle_provider_state(&mut self, uuid: Nanoid, provider_state: ProviderState, instant: Instant);
+    fn handle_provider_state(
+        &mut self,
+        uuid: Nanoid,
+        provider_state: ProviderState,
+        instant: Instant,
+    );
 
     fn handle_taskresult(
         &mut self,

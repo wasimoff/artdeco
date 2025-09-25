@@ -40,7 +40,7 @@ impl Scheduler<()> for Fixed {
         &mut self,
         uuid: Nanoid,
         provider_state: super::ProviderState,
-        instant: std::time::Instant,
+        _instant: std::time::Instant,
     ) {
         if self.fixed_uuid.is_some_and(|fixed_id| fixed_id == uuid)
             && matches!(provider_state, super::ProviderState::Connected)
@@ -66,7 +66,7 @@ impl Scheduler<()> for Fixed {
 
     fn handle_taskresult(
         &mut self,
-        uuid: Nanoid,
+        _uuid: Nanoid,
         task_result: TaskResult<()>,
     ) -> Option<TaskResult<()>> {
         Some(task_result)
