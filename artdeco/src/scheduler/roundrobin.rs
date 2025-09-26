@@ -99,6 +99,12 @@ impl RoundRobin {
 #[derive(Default, Debug)]
 pub struct RoundRobinMetrics {}
 
+impl Default for RoundRobin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WasimoffTraceEvent for RoundRobinMetrics {
     fn to_wasimoff(&self) -> Option<crate::protocol::wasimoff::task::TraceEvent> {
         None

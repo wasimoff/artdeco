@@ -26,15 +26,18 @@ pub fn local_candidates(port: u16) -> Vec<SocketAddr> {
 
     for net in networks.values() {
         for n in &net.addrs {
-            if let systemstat::IpAddr::V4(v) = n.addr {
-                if !v.is_loopback() && !v.is_link_local() && !v.is_broadcast() {
-                    addr.push((IpAddr::V4(v), port).into());
-                }
+            if let systemstat::IpAddr::V4(v) = n.addr
+                && !v.is_loopback()
+                && !v.is_link_local()
+                && !v.is_broadcast()
+            {
+                addr.push((IpAddr::V4(v), port).into());
             }
-            if let systemstat::IpAddr::V6(v) = n.addr {
-                if !v.is_loopback() {
-                    addr.push((IpAddr::V6(v), port).into());
-                }
+
+            if let systemstat::IpAddr::V6(v) = n.addr
+                && !v.is_loopback()
+            {
+                addr.push((IpAddr::V6(v), port).into());
             }
         }
     }
@@ -42,7 +45,7 @@ pub fn local_candidates(port: u16) -> Vec<SocketAddr> {
     if addr.is_empty() {
         panic!("Found no usable network interface");
     }
-    return addr;
+    addr
 }
 
 pub async fn daemon<
@@ -61,7 +64,7 @@ pub async fn daemon<
 
     let local_port = udp_socket.local_addr().unwrap().port();
     let host_addr = local_candidates(local_port);
-    let local_addr = host_addr.first().unwrap().clone();
+    let local_addr = *host_addr.first().unwrap();
     info!("local address is {}", local_addr);
 
     let rtc_config = RTCConnectionConfig {
@@ -106,7 +109,7 @@ pub async fn daemon<
             }
             offloader::Output::TaskResult(result) => {
                 trace!("received result: {:?}", result);
-                let (mut channel, workload_result) = result.to_workload_result(&mut active_tasks);
+                let (mut channel, workload_result) = result.into_workload_result(&mut active_tasks);
                 if let Err(err) = channel.send(workload_result).await {
                     error!("could not respond with workload result, {}", err);
                 }
@@ -121,7 +124,7 @@ pub async fn daemon<
                     trace!("task queue new task");
                     // offload task using offloader
                     // deconstruct Workload, insert channel into slab, create new task
-                    let task = next_task.to_task(&mut active_tasks);
+                    let task = next_task.into_task(&mut active_tasks);
                     offloader.handle_task(task);
                 }
             }
@@ -170,11 +173,11 @@ pub async fn daemon<
                         if n > 0 {
                             match subslice.try_into() {
                                 Ok(datagram) => {
-                                    let input = Input::SocketReceive(Instant::now(), UdpReceive {
+                                    let input = Input::SocketReceive(Instant::now(), Box::new(UdpReceive {
                                         source,
                                         destination: local_addr,
                                         contents: datagram,
-                                    });
+                                    }));
                                     offloader.handle_input(input);
                                 },
                                 Err(error) => {

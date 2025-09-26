@@ -468,6 +468,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
+name = "fib-test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "artdeco",
+ "futures",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1801,19 +1814,6 @@ dependencies = [
  "nom",
  "time",
  "winapi",
-]
-
-[[package]]
-name = "task-scheduler"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "artdeco",
- "futures",
- "tokio",
- "tokio-stream",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

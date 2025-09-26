@@ -66,8 +66,8 @@ async fn main() {
 async fn parse_socket(location: String) -> UnixStream {
     let path = Path::new(&location);
     // Connect to the Unix socket
-    let stream = UnixStream::connect(path).await.unwrap();
-    stream
+
+    UnixStream::connect(path).await.unwrap()
 }
 
 fn parse_binaries(binary_locations: Vec<String>) -> HashMap<String, TaskExecutable> {
@@ -95,7 +95,7 @@ fn parse_binaries(binary_locations: Vec<String>) -> HashMap<String, TaskExecutab
         }
 
         // Read the binary content
-        match fs::read(&path) {
+        match fs::read(path) {
             Ok(content) => {
                 let executable = TaskExecutable::new(content);
                 let hash_ref = executable.hash_ref().clone();

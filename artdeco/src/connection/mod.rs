@@ -57,7 +57,7 @@ pub enum Output {
 }
 
 pub enum InputInner<'a> {
-    SocketReceive(UdpReceive<'a>),
+    SocketReceive(Box<UdpReceive<'a>>),
     Timeout,
     Connect(Nanoid),
     Disconnect(Nanoid),
@@ -184,7 +184,7 @@ impl RtcConnectionManager {
                     source,
                     destination,
                     contents,
-                } = receive;
+                } = *receive;
                 match contents {
                     offloader::Receive::Stun(message) => {
                         // check if stun client can handle message, else forward to rtc
@@ -194,11 +194,11 @@ impl RtcConnectionManager {
                                 trace!("forwarding stun");
                                 let datagram_recv =
                                     DatagramRecv::try_from(message.as_bytes()).unwrap();
-                                let input = InputInner::SocketReceive(UdpReceive {
+                                let input = InputInner::SocketReceive(Box::new(UdpReceive {
                                     source,
                                     destination,
-                                    contents: offloader::Receive::Str0m(datagram_recv),
-                                });
+                                    contents: offloader::Receive::Str0m(Box::new(datagram_recv)),
+                                }));
                                 self.handle_input(Input {
                                     inner: input,
                                     instant,
@@ -218,7 +218,7 @@ impl RtcConnectionManager {
                                 proto: net::Protocol::Udp,
                                 source,
                                 destination,
-                                contents: datagram_recv,
+                                contents: *datagram_recv,
                             },
                         ));
                         if let Some((_, con)) = self
@@ -252,7 +252,7 @@ impl RtcConnectionManager {
             }
         }
         // advance time for all connections
-        for (_, con) in &mut self.rtc_connections {
+        for con in self.rtc_connections.values_mut() {
             con.handle_input(rtc_connection::Receive::Timeout(instant));
         }
     }

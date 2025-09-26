@@ -14,6 +14,12 @@ pub struct Fixed {
     last_instant: Instant,
 }
 
+impl Default for Fixed {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Fixed {
     pub fn new() -> Self {
         Self {
@@ -57,7 +63,7 @@ impl Scheduler<()> for Fixed {
                 return Output::Offload(dest, task);
             }
         }
-        return Output::Timeout(self.last_instant + Duration::from_secs(10));
+        Output::Timeout(self.last_instant + Duration::from_secs(10))
     }
 
     fn schedule(&mut self, task: Task<()>) {

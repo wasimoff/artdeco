@@ -26,7 +26,7 @@ use crate::{
 use lazy_static::lazy_static;
 
 pub enum Input<'a> {
-    SocketReceive(Instant, UdpReceive<'a>),
+    SocketReceive(Instant, Box<UdpReceive<'a>>),
     Timeout(Instant),
 }
 
@@ -57,7 +57,7 @@ lazy_static! {
 
 pub(crate) enum Receive<'a> {
     Stun(message::Message<'a>),
-    Str0m(str0m::net::DatagramRecv<'a>),
+    Str0m(Box<str0m::net::DatagramRecv<'a>>),
 }
 
 impl<'a> TryFrom<&'a [u8]> for Receive<'a> {
@@ -71,7 +71,7 @@ impl<'a> TryFrom<&'a [u8]> for Receive<'a> {
 
         // then try str0m
         match str0m::net::DatagramRecv::try_from(value) {
-            Ok(recv) => Ok(Receive::Str0m(recv)),
+            Ok(recv) => Ok(Receive::Str0m(Box::new(recv))),
             Err(err) => Err(err),
         }
     }
@@ -79,7 +79,7 @@ impl<'a> TryFrom<&'a [u8]> for Receive<'a> {
 
 impl<'a> From<str0m::net::DatagramRecv<'a>> for Receive<'a> {
     fn from(value: str0m::net::DatagramRecv<'a>) -> Self {
-        Self::Str0m(value)
+        Self::Str0m(Box::new(value))
     }
 }
 
@@ -273,6 +273,6 @@ impl<M, S: Scheduler<M>> Offloader<S, M> {
             }
         }
 
-        return Output::Timeout(next_timeout);
+        Output::Timeout(next_timeout)
     }
 }

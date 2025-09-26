@@ -25,7 +25,7 @@ use crate::{
         },
     },
     scheduler::Scheduler,
-    task::{Status, TaskExecutable, WasimoffTraceEvent, Workload, WorkloadResult},
+    task::{Status, TaskExecutable, WasimoffTraceEvent, WorkloadResult},
 };
 
 use std::fmt::Debug;
@@ -46,8 +46,7 @@ pub async fn wasimoff_broker<M: WasimoffTraceEvent + Debug + Send + Default + 's
     info!("Starting wasimoff broker");
 
     // Create channels for task queue and responses
-    let (mut task_sender, task_receiver) =
-        mpsc::channel::<Workload<Sender<WorkloadResult<CustomData, M>>, CustomData, M>>(100);
+    let (mut task_sender, task_receiver) = mpsc::channel::<Workload<M>>(100);
     let (response_sender, response_receiver) = mpsc::channel::<WorkloadResult<CustomData, M>>(100);
 
     tokio::spawn(daemon_nats(task_receiver, scheduler, nats_url));
@@ -79,9 +78,11 @@ pub async fn wasimoff_broker<M: WasimoffTraceEvent + Debug + Send + Default + 's
     Ok(())
 }
 
+type Workload<M> = crate::task::Workload<Sender<WorkloadResult<CustomData, M>>, CustomData, M>;
+
 async fn read_from_socket<M: WasimoffTraceEvent>(
     buffer: &[u8],
-    task_queue: &mut Sender<Workload<Sender<WorkloadResult<CustomData, M>>, CustomData, M>>,
+    task_queue: &mut Sender<Workload<M>>,
     back_channel: Sender<WorkloadResult<CustomData, M>>,
     task_executables: &HashMap<String, TaskExecutable>,
 ) {

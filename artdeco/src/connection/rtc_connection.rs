@@ -9,17 +9,17 @@ use str0m::{
 };
 use tracing::{debug, error, info, trace};
 
+#[derive(Default)]
 pub enum State {
     Invalid,
-    Offer { pending: SdpPendingOffer },
+    Offer {
+        pending: SdpPendingOffer,
+    },
+    #[default]
     Standby,
-    ChannelOpen { channel_id: ChannelId },
-}
-
-impl Default for State {
-    fn default() -> Self {
-        State::Invalid
-    }
+    ChannelOpen {
+        channel_id: ChannelId,
+    },
 }
 
 pub enum Destination {
@@ -154,7 +154,7 @@ impl RTCConnection {
             },
             _ => {}
         }
-        return false;
+        false
     }
 
     pub fn send_data(&mut self, data: &[u8]) {

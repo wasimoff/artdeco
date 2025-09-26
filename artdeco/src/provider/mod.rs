@@ -34,6 +34,12 @@ pub struct ProviderManager<M> {
     last_instant: Instant,
 }
 
+impl<M> Default for ProviderManager<M> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<M> ProviderManager<M> {
     pub fn new() -> Self {
         Self {
@@ -59,7 +65,7 @@ impl<M> ProviderManager<M> {
 
     fn update_instant(&mut self, instant: Instant) {
         self.last_instant = instant;
-        for (_, provider) in &mut self.wasimoff_providers {
+        for provider in self.wasimoff_providers.values_mut() {
             provider.handle_timeout(instant);
         }
     }
@@ -71,13 +77,12 @@ impl<M> ProviderManager<M> {
     }
 
     pub fn create(&mut self, id: Nanoid) {
-        if self.wasimoff_providers.get(&id).is_none() {
+        self.wasimoff_providers.entry(id).or_insert_with(|| {
             let config = WasimoffConfig {
                 client_identifier: id,
             };
-            self.wasimoff_providers
-                .insert(id, WasimoffProvider::new(config));
-        }
+            WasimoffProvider::new(config)
+        });
     }
 
     pub fn poll_output(&mut self) -> Output<M> {

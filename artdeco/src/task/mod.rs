@@ -107,7 +107,7 @@ pub(crate) struct AssociatedData<S, D> {
 }
 
 impl<M: Default, D, S: Sink<WorkloadResult<D, M>>> Workload<S, D, M> {
-    pub(crate) fn to_task(self, slab: &mut Slab<AssociatedData<S, D>>) -> Task<M> {
+    pub(crate) fn into_task(self, slab: &mut Slab<AssociatedData<S, D>>) -> Task<M> {
         let Self {
             executable,
             args,
@@ -150,7 +150,7 @@ pub enum Status {
 }
 
 impl<M> TaskResult<M> {
-    pub(crate) fn to_workload_result<D, S: Sink<WorkloadResult<D, M>>>(
+    pub(crate) fn into_workload_result<D, S: Sink<WorkloadResult<D, M>>>(
         self,
         slab: &mut Slab<AssociatedData<S, D>>,
     ) -> (S, WorkloadResult<D, M>) {
@@ -169,7 +169,7 @@ impl<M> TaskResult<M> {
                 metrics,
                 custom_data,
             };
-            return (response_channel, workload_result);
+            (response_channel, workload_result)
         } else {
             panic!("should not be called with scheduler tasks");
         }
