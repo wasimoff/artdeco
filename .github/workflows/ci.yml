@@ -75,6 +75,9 @@ jobs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
 
+    - name: Set up Docker Compose
+      uses: docker/setup-compose-action@v1
+
     - name: Cache cargo registry
       uses: actions/cache@v3
       with:
@@ -97,16 +100,12 @@ jobs:
       run: cargo build --verbose --all
 
     - name: Start services with docker-compose
-      run: docker-compose up -d
-
-    - name: Wait for services to be ready
-      run: |
-        timeout 60 bash -c 'until docker-compose ps | grep -q "healthy"; do echo "Waiting for services..."; sleep 2; done'
+      run: docker compose up -d
 
     - name: Run fibonacci integration test
       run: |
-        cd eval/fib-test
-        timeout 60 cargo run -- "nats://localhost:4222"
+        cd cmd/integration-test
+        timeout 60 cargo run -- "localhost:4222"
 
     - name: Check service logs
       if: always()
@@ -120,4 +119,4 @@ jobs:
 
     - name: Cleanup services
       if: always()
-      run: docker-compose down -v
+      run: docker compose down -v
