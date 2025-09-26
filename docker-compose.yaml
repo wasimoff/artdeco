@@ -8,14 +8,17 @@ services:
     command: "--config /etc/nats/nats.conf"
     volumes:
       - "./nats.conf:/etc/nats/nats.conf:ro"
-    networks: [ "nats", "default" ]
 
-  provider:
-    image: ansemjo/wasimoff:provider
+  provider-1:
+    image: ghcr.io/wasimoff/provider:nightly
     restart: unless-stopped
-    command: ["--url", "ad://nats:8080/?announce=5"]
-    networks: [ "nats", "default" ]
+    command: ["--url", "ad://nats:8080/?announce=5", "--workers", "1"]
+    depends_on:
+      - nats
 
-networks:
-  nats:
-    name: nats
+  provider-2:
+    image: ghcr.io/wasimoff/provider:nightly
+    restart: unless-stopped
+    command: ["--url", "ad://nats:8080/?announce=5", "--workers", "1"]
+    depends_on:
+      - nats

@@ -96,58 +96,28 @@ jobs:
     - name: Build project
       run: cargo build --verbose --all
 
-    - name: Create Docker network
-      run: docker network create nats || true
+    - name: Start services with docker-compose
+      run: docker-compose up -d
 
-    - name: Start NATS container with config
+    - name: Wait for services to be ready
       run: |
-        docker run -d \
-          --name nats-integration \
-          --network nats \
-          -p 4222:4222 \
-          -p 8222:8222 \
-          -p 8080:8080 \
-          -v ${{ github.workspace }}/nats.conf:/etc/nats/nats.conf:ro \
-          nats:latest \
-          --config /etc/nats/nats.conf
-
-    - name: Wait for NATS to be ready
-      run: |
-        timeout 30 bash -c 'until curl -f http://localhost:8222/varz; do echo "Waiting for NATS..."; sleep 2; done'
-
-    - name: Start first wasimoff provider
-      run: |
-        docker run -d \
-          --name wasimoff-provider-1 \
-          --network nats \
-          ghcr.io/wasimoff:provider:nightly \
-          --url "ad://nats-integration:8080/?announce=5"
-
-    - name: Start second wasimoff provider  
-      run: |
-        docker run -d \
-          --name wasimoff-provider-2 \
-          --network nats \
-          ghcr.io/wasimoff:provider:nightly \
-          --url "ad://nats-integration:8080/?announce=5"
+        timeout 60 bash -c 'until docker-compose ps | grep -q "healthy"; do echo "Waiting for services..."; sleep 2; done'
 
     - name: Run fibonacci integration test
       run: |
         cd eval/fib-test
         timeout 60 cargo run -- "nats://localhost:4222"
 
-    - name: Check provider logs
+    - name: Check service logs
       if: always()
       run: |
         echo "=== NATS logs ==="
-        docker logs nats-integration || true
+        docker-compose logs nats || true
         echo "=== Provider 1 logs ==="
-        docker logs wasimoff-provider-1 || true
+        docker-compose logs wasimoff-provider-1 || true
         echo "=== Provider 2 logs ==="
-        docker logs wasimoff-provider-2 || true
+        docker-compose logs wasimoff-provider-2 || true
 
-    - name: Cleanup containers
+    - name: Cleanup services
       if: always()
-      run: |
-        docker rm -f nats-integration wasimoff-provider-1 wasimoff-provider-2 || true
-        docker network rm nats || true
+      run: docker-compose down -v
