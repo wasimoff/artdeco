@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install protoc
+      uses: arduino/setup-protoc@v3
+      with:
+        version: "32.x"
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo index
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo build
+      uses: actions/cache@v3
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Run clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Build
+      run: cargo build --verbose --all
+
+    - name: Run tests
+      run: cargo test --verbose --all
+
+  integration:
+    name: Integration Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install protoc
+      uses: arduino/setup-protoc@v3
+      with:
+        version: "32.x"
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo index
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo build
+      uses: actions/cache@v3
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Build project
+      run: cargo build --verbose --all
+
+    - name: Create Docker network
+      run: docker network create nats || true
+
+    - name: Start NATS container with config
+      run: |
+        docker run -d \
+          --name nats-integration \
+          --network nats \
+          -p 4222:4222 \
+          -p 8222:8222 \
+          -p 8080:8080 \
+          -v ${{ github.workspace }}/nats.conf:/etc/nats/nats.conf:ro \
+          nats:latest \
+          --config /etc/nats/nats.conf
+
+    - name: Wait for NATS to be ready
+      run: |
+        timeout 30 bash -c 'until curl -f http://localhost:8222/varz; do echo "Waiting for NATS..."; sleep 2; done'
+
+    - name: Start first wasimoff provider
+      run: |
+        docker run -d \
+          --name wasimoff-provider-1 \
+          --network nats \
+          ansemjo/wasimoff:provider \
+          --url "ad://nats-integration:8080/?announce=5"
+
+    - name: Start second wasimoff provider  
+      run: |
+        docker run -d \
+          --name wasimoff-provider-2 \
+          --network nats \
+          ansemjo/wasimoff:provider \
+          --url "ad://nats-integration:8080/?announce=5"
+
+    - name: Run fibonacci integration test
+      run: |
+        cd eval/fib-test
+        timeout 60 cargo run -- "nats://localhost:4222"
+
+    - name: Check provider logs
+      if: always()
+      run: |
+        echo "=== NATS logs ==="
+        docker logs nats-integration || true
+        echo "=== Provider 1 logs ==="
+        docker logs wasimoff-provider-1 || true
+        echo "=== Provider 2 logs ==="
+        docker logs wasimoff-provider-2 || true
+
+    - name: Cleanup containers
+      if: always()
+      run: |
+        docker rm -f nats-integration wasimoff-provider-1 wasimoff-provider-2 || true
+        docker network rm nats || true
