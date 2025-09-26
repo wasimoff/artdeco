@@ -120,7 +120,7 @@ jobs:
         docker run -d \
           --name wasimoff-provider-1 \
           --network nats \
-          ansemjo/wasimoff:provider \
+          ghcr.io/wasimoff:provider:nightly \
           --url "ad://nats-integration:8080/?announce=5"
 
     - name: Start second wasimoff provider  
@@ -128,7 +128,7 @@ jobs:
         docker run -d \
           --name wasimoff-provider-2 \
           --network nats \
-          ansemjo/wasimoff:provider \
+          ghcr.io/wasimoff:provider:nightly \
           --url "ad://nats-integration:8080/?announce=5"
 
     - name: Run fibonacci integration test
