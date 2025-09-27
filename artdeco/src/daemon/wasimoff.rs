@@ -1,17 +1,18 @@
 use std::{
     collections::HashMap,
+    fmt::Display,
     marker::PhantomData,
     time::{Duration, SystemTime},
 };
 
 use anyhow::Result;
 use async_nats::ToServerAddrs;
+use bytes::Bytes;
 use futures::{
-    SinkExt, StreamExt,
+    Sink, SinkExt, Stream, StreamExt,
     channel::mpsc::{self, Sender},
 };
 use protobuf::{Message, MessageField, well_known_types::any::Any};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::{error, info, warn};
 
 use crate::{
@@ -38,7 +39,7 @@ struct CustomData {
 }
 
 pub async fn wasimoff_broker<M: WasimoffTraceEvent + Debug + Send + Default + 'static>(
-    mut socket: impl AsyncRead + AsyncWrite + Unpin,
+    mut datagram_socket: impl Stream<Item = Bytes> + Sink<Bytes, Error = impl Display> + Unpin,
     scheduler: impl Scheduler<M> + Send + 'static,
     nats_url: impl ToServerAddrs + Send + 'static,
     executables: &HashMap<String, TaskExecutable>,
@@ -52,24 +53,20 @@ pub async fn wasimoff_broker<M: WasimoffTraceEvent + Debug + Send + Default + 's
     tokio::spawn(daemon_nats(task_receiver, scheduler, nats_url));
     let mut fused_task_responses = response_receiver.fuse();
 
-    // Buffer for reading from socket
-    let mut recv_buffer = vec![0u8; 4096];
-
-    tokio::select! {
-        read_result = socket.read(&mut recv_buffer) => {
-            match read_result {
-                Ok(num_bytes) => {
-                    if num_bytes > 0 {
-                        let (subslice, _rest) = recv_buffer.as_slice().split_at(num_bytes);
-                        read_from_socket(subslice, &mut task_sender, response_sender.clone(), executables).await;
-                    }
-                },
-                Err(_) => todo!(),
-            }
-        },
-        task_response = fused_task_responses.next() => {
-            if let Some(next_response) = task_response {
-                write_to_socket(&mut socket, next_response).await;
+    loop {
+        tokio::select! {
+            read_result = datagram_socket.next() => {
+                if let Some(datagram) = read_result {
+                    read_from_socket(&datagram, &mut task_sender, response_sender.clone(), executables).await;
+                } else {
+                    break
+                }
+            },
+            task_response = fused_task_responses.next() => {
+                match task_response {
+                    Some(next_response) => write_to_socket(&mut datagram_socket, next_response).await,
+                    None => break,
+                }
             }
         }
     }
@@ -143,7 +140,7 @@ async fn read_from_socket<M: WasimoffTraceEvent>(
 }
 
 async fn write_to_socket<M: WasimoffTraceEvent>(
-    mut socket: impl AsyncWrite + Unpin,
+    mut socket: impl Sink<Bytes, Error = impl Display> + Unpin,
     task_result: WorkloadResult<CustomData, M>,
 ) {
     let WorkloadResult {
@@ -203,7 +200,7 @@ async fn write_to_socket<M: WasimoffTraceEvent>(
 
     match envelope.write_to_bytes() {
         Ok(serialized) => {
-            if let Err(e) = socket.write_all(&serialized).await {
+            if let Err(e) = socket.send(serialized.into()).await {
                 error!("Failed to write response to socket: {}", e);
             }
         }

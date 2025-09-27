@@ -1,13 +1,16 @@
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::HashMap, fs, path::Path, pin::pin};
 
 use artdeco::{
     daemon::wasimoff::wasimoff_broker,
     scheduler::{fixed::Fixed, roundrobin::RoundRobin},
     task::TaskExecutable,
 };
+use bytes::Bytes;
 use clap::{Parser, ValueEnum, arg, command};
-use tokio::net::UnixListener;
-use tracing::{debug, error};
+use futures::{SinkExt, StreamExt};
+use tokio::net::TcpListener;
+use tokio_websockets::{Message, ServerBuilder};
+use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
 /// Simple program to greet a person
@@ -49,17 +52,27 @@ async fn main() {
 
     let args = Args::parse();
 
-    let path = Path::new(&args.socket);
-    let listener = UnixListener::bind(path).unwrap();
-    let (socket, _addr) = listener.accept().await.unwrap();
+    let listener = TcpListener::bind(&args.socket).await.unwrap();
+    debug!("Initialized websocket at {}", args.socket);
+    let (stream, _addr) = listener.accept().await.unwrap();
+    let (_request, ws_stream) = ServerBuilder::new().accept(stream).await.unwrap();
+
+    let mapped_stream =
+        ws_stream.filter_map(async |msg| msg.ok().map(|msg| msg.into_payload().into()));
+    let mapped_sink = pin![
+        mapped_stream
+            .with::<_, _, _, anyhow::Error>(async |bytes: Bytes| Ok(Message::binary(bytes)))
+    ];
+
+    info!("Accepted websocket connection from");
 
     let binaries = parse_binaries(args.binaries);
     match args.scheduler {
-        Scheduler::Fixed => wasimoff_broker(socket, Fixed::new(), args.broker_url, &binaries)
+        Scheduler::Fixed => wasimoff_broker(mapped_sink, Fixed::new(), args.broker_url, &binaries)
             .await
             .unwrap(),
         Scheduler::RoundRobin => {
-            wasimoff_broker(socket, RoundRobin::new(), args.broker_url, &binaries)
+            wasimoff_broker(mapped_sink, RoundRobin::new(), args.broker_url, &binaries)
                 .await
                 .unwrap()
         }
