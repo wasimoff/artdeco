@@ -6,7 +6,7 @@ use artdeco::{
     task::TaskExecutable,
 };
 use clap::{Parser, ValueEnum, arg, command};
-use tokio::net::UnixStream;
+use tokio::net::UnixListener;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
@@ -49,7 +49,10 @@ async fn main() {
 
     let args = Args::parse();
 
-    let socket = parse_socket(args.socket).await;
+    let path = Path::new(&args.socket);
+    let listener = UnixListener::bind(path).unwrap();
+    let (socket, _addr) = listener.accept().await.unwrap();
+
     let binaries = parse_binaries(args.binaries);
     match args.scheduler {
         Scheduler::Fixed => wasimoff_broker(socket, Fixed::new(), args.broker_url, &binaries)
@@ -61,13 +64,6 @@ async fn main() {
                 .unwrap()
         }
     }
-}
-
-async fn parse_socket(location: String) -> UnixStream {
-    let path = Path::new(&location);
-    // Connect to the Unix socket
-
-    UnixStream::connect(path).await.unwrap()
 }
 
 fn parse_binaries(binary_locations: Vec<String>) -> HashMap<String, TaskExecutable> {
