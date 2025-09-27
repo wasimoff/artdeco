@@ -13,7 +13,7 @@ use futures::{
     channel::mpsc::{self, Sender},
 };
 use protobuf::{Message, MessageField, well_known_types::any::Any};
-use tracing::{error, info, warn};
+use tracing::{error, info, trace, warn};
 
 use crate::{
     daemon::nats::daemon_nats,
@@ -57,6 +57,7 @@ pub async fn wasimoff_broker<M: WasimoffTraceEvent + Debug + Send + Default + 's
         tokio::select! {
             read_result = datagram_socket.next() => {
                 if let Some(datagram) = read_result {
+                    trace!("received new datagram, {:?}", datagram);
                     read_from_socket(&datagram, &mut task_sender, response_sender.clone(), executables).await;
                 } else {
                     break

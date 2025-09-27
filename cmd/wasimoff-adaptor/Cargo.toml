@@ -9,7 +9,7 @@ tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread"] }
 artdeco = { path = "../../artdeco", features = ["nats"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tokio-websockets = { version = "0.12.1", features = ["server", "sha1_smol"] }
+tokio-tungstenite = "*"
 futures = "0.3"
 bytes = "1.10"
 anyhow = "1"

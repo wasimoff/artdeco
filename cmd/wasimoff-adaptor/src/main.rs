@@ -9,7 +9,13 @@ use bytes::Bytes;
 use clap::{Parser, ValueEnum, arg, command};
 use futures::{SinkExt, StreamExt};
 use tokio::net::TcpListener;
-use tokio_websockets::{Message, ServerBuilder};
+use tokio_tungstenite::{
+    accept_hdr_async,
+    tungstenite::{
+        Message,
+        handshake::server::{Request, Response},
+    },
+};
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
@@ -44,7 +50,10 @@ enum Scheduler {
 
 #[tokio::main]
 async fn main() {
-    let filter = EnvFilter::new("error").add_directive("artdeco=debug".parse().unwrap());
+    let filter = EnvFilter::new("error")
+        .add_directive("artdeco=debug".parse().unwrap())
+        .add_directive("wasimoff_adaptor=debug".parse().unwrap())
+        .add_directive("artdeco::daemon::wasimoff=trace".parse().unwrap());
     let subscriber = tracing_subscriber::fmt().with_env_filter(filter).finish();
     tracing::subscriber::set_global_default(subscriber)
         .map_err(|_err| eprintln!("Unable to set global default subscriber"))
@@ -55,16 +64,28 @@ async fn main() {
     let listener = TcpListener::bind(&args.socket).await.unwrap();
     debug!("Initialized websocket at {}", args.socket);
     let (stream, _addr) = listener.accept().await.unwrap();
-    let (_request, ws_stream) = ServerBuilder::new().accept(stream).await.unwrap();
+    let ws_stream = accept_hdr_async(stream, |_request: &Request, mut response: Response| {
+        response.headers_mut().append(
+            "Sec-WebSocket-Protocol",
+            "wasimoff_provider_v1_protobuf".parse().unwrap(),
+        );
+        Ok(response)
+    })
+    .await
+    .unwrap();
 
-    let mapped_stream =
-        ws_stream.filter_map(async |msg| msg.ok().map(|msg| msg.into_payload().into()));
+    let mapped_stream = ws_stream.filter_map(async |msg| {
+        msg.ok().and_then(|msg| match msg {
+            Message::Binary(bytes) => Some(bytes),
+            _ => None,
+        })
+    });
     let mapped_sink = pin![
         mapped_stream
             .with::<_, _, _, anyhow::Error>(async |bytes: Bytes| Ok(Message::binary(bytes)))
     ];
 
-    info!("Accepted websocket connection from");
+    info!("Accepted websocket connection");
 
     let binaries = parse_binaries(args.binaries);
     match args.scheduler {
