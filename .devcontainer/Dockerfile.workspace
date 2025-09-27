@@ -1,0 +1,9 @@
+# Multi-stage build to copy directories from wasimoff/tracebench:nightly
+FROM ghcr.io/wasimoff/tracebench:nightly AS tracebench
+
+# Base devcontainer image
+FROM mcr.microsoft.com/devcontainers/base:bullseye
+
+# Copy /dataset and /tracebench from the tracebench image
+COPY --from=tracebench /dataset /dataset
+COPY --from=tracebench /tracebench /usr/bin/tracebench
