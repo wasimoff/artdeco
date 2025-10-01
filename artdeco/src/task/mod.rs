@@ -1,6 +1,6 @@
 use std::{
     marker::PhantomData,
-    time::{Duration, Instant, SystemTime},
+    time::{Instant, SystemTime},
 };
 
 use bytes::Bytes;
@@ -60,7 +60,6 @@ pub struct Task<M> {
 pub struct TaskMetrics<M> {
     pub executor_id: Option<Nanoid>,
     pub trace: Vec<TraceEvent<M>>,
-    pub duration: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -167,28 +166,13 @@ impl<M> TaskResult<M> {
         let Self {
             id,
             status,
-            mut metrics,
+            metrics,
         } = self;
         if let TaskId::Consumer(key) = id {
             let AssociatedData {
                 response_channel,
                 custom_data,
             } = slab.remove(key);
-            // Calculate duration from SchedulerEnter to SchedulerLeave
-            let mut scheduler_enter_time = None;
-            let mut scheduler_leave_time = None;
-
-            for event in &metrics.trace {
-                match event {
-                    TraceEvent::SchedulerEnter(instant) => scheduler_enter_time = Some(*instant),
-                    TraceEvent::SchedulerLeave(instant) => scheduler_leave_time = Some(*instant),
-                    _ => {}
-                }
-            }
-
-            if let (Some(enter), Some(leave)) = (scheduler_enter_time, scheduler_leave_time) {
-                metrics.duration = leave.duration_since(enter);
-            }
             let workload_result = WorkloadResult {
                 status,
                 metrics,

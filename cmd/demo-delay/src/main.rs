@@ -1,9 +1,9 @@
-use std::marker::PhantomData;
+use std::{fmt::Display, marker::PhantomData, time::Duration};
 
 use artdeco::{
     daemon::nats::daemon_nats,
     scheduler::fixed::Fixed,
-    task::{TaskExecutable, Workload},
+    task::{TaskExecutable, TraceEvent, Workload, WorkloadResult},
 };
 use futures::{StreamExt, channel::mpsc};
 
@@ -52,7 +52,54 @@ async fn main() -> anyhow::Result<()> {
     daemon_nats(receiver, scheduler, nats_url).await?;
     let first_result = response_receiver.next().await.unwrap();
     let second_result = response_receiver.next().await.unwrap();
-    info!("First Result {:?}", first_result.metrics.duration);
-    info!("Second Result {:?}", second_result.metrics.duration);
+
+    let first_time = calc_task_time(&first_result);
+    let second_time = calc_task_time(&second_result);
+
+    info!("First Result {}", first_time);
+    info!("Second Result {}", second_time);
     Ok(())
+}
+
+#[derive(Debug)]
+struct TaskTime {
+    w_connection: Duration,
+    wo_connection: Duration,
+}
+
+impl Display for TaskTime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "TaskTime {{ including connection setup: {:?}, without connection setup: {:?} }}",
+            self.w_connection, self.wo_connection
+        )
+    }
+}
+
+fn calc_task_time<A, B>(workload: &WorkloadResult<A, B>) -> TaskTime {
+    // Calculate duration from SchedulerEnter to SchedulerLeave
+    let mut scheduled_time = None;
+    let mut scheduler_enter_time = None;
+    let mut scheduler_leave_time = None;
+
+    for event in &workload.metrics.trace {
+        match event {
+            TraceEvent::SchedulerScheduled(instant) => scheduled_time = Some(*instant),
+            TraceEvent::SchedulerLeave(instant) => scheduler_leave_time = Some(*instant),
+            TraceEvent::SchedulerEnter(instant) => scheduler_enter_time = Some(*instant),
+            _ => {}
+        }
+    }
+
+    if let (Some(enter), Some(leave), Some(scheduled)) =
+        (scheduler_enter_time, scheduler_leave_time, scheduled_time)
+    {
+        TaskTime {
+            w_connection: leave.duration_since(enter),
+            wo_connection: leave.duration_since(scheduled),
+        }
+    } else {
+        unreachable!()
+    }
 }
