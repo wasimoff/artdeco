@@ -73,14 +73,16 @@ impl<M> WasimoffProvider<M> {
             );
             return;
         }
-        let pending_task = pending_task.unwrap();
-
-        // TODO set metrics
+        let mut pending_task = pending_task.unwrap();
 
         debug!("Received envelope payload {:?}", envelope.payload);
         let task_response: wasip1::Response = envelope.payload.unpack().unwrap().unwrap();
         let result = task_response.result.unwrap();
 
+        pending_task
+            .metrics
+            .trace
+            .push(crate::task::TraceEvent::WasimoffDeserialized(Instant::now()));
         match result {
             wasip1::response::Result::Error(message) => {
                 let status = if message.starts_with("qos") {
@@ -141,7 +143,7 @@ impl<M> WasimoffProvider<M> {
             executable,
             args,
             id,
-            metrics,
+            mut metrics,
             deadline: _,
         } = task;
         let mut offload_message = wasip1::Request::new();
@@ -181,10 +183,13 @@ impl<M> WasimoffProvider<M> {
         offload_message.params = MessageField::some(params);
 
         let envelope = self.pack(&offload_message);
-        self.active_offloads
-            .insert(envelope.sequence(), ActiveTask { metrics, id });
         let bytes = envelope.write_to_bytes().unwrap();
         self.pending_outputs.push_back(Output::Transmit(bytes));
+        metrics
+            .trace
+            .push(crate::task::TraceEvent::WasimoffSerialized(Instant::now()));
+        self.active_offloads
+            .insert(envelope.sequence(), ActiveTask { metrics, id });
     }
 }
 

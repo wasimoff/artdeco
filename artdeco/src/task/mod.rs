@@ -1,6 +1,6 @@
 use std::{
     marker::PhantomData,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use bytes::Bytes;
@@ -67,6 +67,14 @@ pub struct TaskMetrics<M> {
 pub enum TraceEvent<M> {
     External(Vec<u8>),
     Scheduler(M),
+    SchedulerEnter(Instant),
+    SchedulerScheduled(Instant),
+    WasimoffSerialized(Instant),
+    //ConnectionSend(Instant),
+    //ConnectionReceive(Instant),
+    WasimoffDeserialized(Instant),
+    SchedulerResultEnter(Instant),
+    SchedulerLeave(Instant),
     // other events
 }
 
@@ -88,10 +96,12 @@ where
         match self {
             TraceEvent::External(_items) => None,
             TraceEvent::Scheduler(scheduler_event) => scheduler_event.to_wasimoff(),
+            _ => None,
         }
     }
 }
 
+#[derive(Clone)]
 pub struct Workload<S, D, M> {
     pub executable: TaskExecutable,
     pub args: Vec<String>,
@@ -157,13 +167,28 @@ impl<M> TaskResult<M> {
         let Self {
             id,
             status,
-            metrics,
+            mut metrics,
         } = self;
         if let TaskId::Consumer(key) = id {
             let AssociatedData {
                 response_channel,
                 custom_data,
             } = slab.remove(key);
+            // Calculate duration from SchedulerEnter to SchedulerLeave
+            let mut scheduler_enter_time = None;
+            let mut scheduler_leave_time = None;
+
+            for event in &metrics.trace {
+                match event {
+                    TraceEvent::SchedulerEnter(instant) => scheduler_enter_time = Some(*instant),
+                    TraceEvent::SchedulerLeave(instant) => scheduler_leave_time = Some(*instant),
+                    _ => {}
+                }
+            }
+
+            if let (Some(enter), Some(leave)) = (scheduler_enter_time, scheduler_leave_time) {
+                metrics.duration = leave.duration_since(enter);
+            }
             let workload_result = WorkloadResult {
                 status,
                 metrics,

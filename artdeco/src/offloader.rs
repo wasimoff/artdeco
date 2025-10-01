@@ -199,8 +199,11 @@ impl<M, S: Scheduler<M>> Offloader<S, M> {
         self.last_instant = instant;
     }
 
-    pub fn handle_task(&mut self, task: Task<M>) {
-        info!("scheduling task");
+    pub fn handle_task(&mut self, mut task: Task<M>) {
+        debug!("scheduling task");
+        task.metrics
+            .trace
+            .push(crate::task::TraceEvent::SchedulerEnter(Instant::now()));
         self.scheduler.schedule(task);
     }
 
@@ -216,15 +219,26 @@ impl<M, S: Scheduler<M>> Offloader<S, M> {
                 });
                 self.provider_manager.create(uuid);
             }
-            scheduler::Output::Offload(uuid, task) => {
+            scheduler::Output::Offload(uuid, mut task) => {
                 info!("offloading task to {}", uuid);
+                task.metrics
+                    .trace
+                    .push(crate::task::TraceEvent::SchedulerScheduled(Instant::now()));
                 self.provider_manager.offload(task, uuid);
             }
         }
 
         match self.provider_manager.poll_output() {
-            provider::Output::TaskResult(uuid, task_result) => {
-                if let Some(result) = self.scheduler.handle_taskresult(uuid, task_result) {
+            provider::Output::TaskResult(uuid, mut task_result) => {
+                task_result
+                    .metrics
+                    .trace
+                    .push(crate::task::TraceEvent::SchedulerResultEnter(Instant::now()));
+                if let Some(mut result) = self.scheduler.handle_taskresult(uuid, task_result) {
+                    result
+                        .metrics
+                        .trace
+                        .push(crate::task::TraceEvent::SchedulerLeave(Instant::now()));
                     return Output::TaskResult(result);
                 }
             }

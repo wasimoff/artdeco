@@ -9,7 +9,7 @@ use crate::{
 
 pub struct Fixed {
     fixed_uuid: Option<Nanoid>,
-    connected: bool,
+    connected: ConnectionStatus,
     task_list: Vec<Task<()>>,
     last_instant: Instant,
 }
@@ -20,11 +20,17 @@ impl Default for Fixed {
     }
 }
 
+enum ConnectionStatus {
+    Disconnected,
+    WaitingForConnection,
+    Connected,
+}
+
 impl Fixed {
     pub fn new() -> Self {
         Self {
             fixed_uuid: None,
-            connected: false,
+            connected: ConnectionStatus::Disconnected,
             task_list: Vec::new(),
             last_instant: Instant::now(),
         }
@@ -51,16 +57,23 @@ impl Scheduler<()> for Fixed {
         if self.fixed_uuid.is_some_and(|fixed_id| fixed_id == uuid)
             && matches!(provider_state, super::ProviderState::Connected)
         {
-            self.connected = true
+            self.connected = ConnectionStatus::Connected;
         }
     }
 
     fn poll_output(&mut self) -> super::Output<()> {
         if let Some(dest) = self.fixed_uuid {
-            if !self.connected {
-                return Output::Connect(dest);
-            } else if let Some(task) = self.task_list.pop() {
-                return Output::Offload(dest, task);
+            match self.connected {
+                ConnectionStatus::Disconnected => {
+                    self.connected = ConnectionStatus::WaitingForConnection;
+                    return Output::Connect(dest);
+                }
+                ConnectionStatus::Connected => {
+                    if let Some(task) = self.task_list.pop() {
+                        return Output::Offload(dest, task);
+                    }
+                }
+                ConnectionStatus::WaitingForConnection => {}
             }
         }
         Output::Timeout(self.last_instant + Duration::from_secs(10))

@@ -25,7 +25,6 @@ use stun_proto::types::message::TransactionId;
 use stun_proto::types::prelude::MessageWrite;
 use stun_proto::types::prelude::MessageWriteExt;
 use tracing::debug;
-use tracing::info;
 use tracing::trace;
 
 use crate::connection::rtc_connection::SdpMessage;
@@ -206,7 +205,7 @@ impl RtcConnectionManager {
                             }
                             HandleStunReply::ValidatedStunResponse(message)
                             | HandleStunReply::UnvalidatedStunResponse(message) => {
-                                info!("handling stun from {}", source);
+                                debug!("handling stun from {}", source);
                                 self.handle_stun_response(message);
                             }
                         }
@@ -229,7 +228,7 @@ impl RtcConnectionManager {
                             // We found the client that accepts the input.
                             con.handle_input(rtc_input);
                         } else {
-                            info!("No client accepts UDP input: {:?}", rtc_input);
+                            debug!("No client accepts UDP input: {:?}", rtc_input);
                         }
                     }
                 }
