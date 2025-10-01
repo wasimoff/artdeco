@@ -72,6 +72,7 @@ pub struct RTCConnection {
     pub config: RTCConnectionConfig,
     last: Instant,
     remote_uuid: Nanoid,
+    ready: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +101,7 @@ impl RTCConnection {
             config,
             last: start,
             remote_uuid,
+            ready: true,
         }
     }
 
@@ -111,6 +113,7 @@ impl RTCConnection {
             destination: self.remote_uuid,
             msg: Sdp::Candidate(candidate),
         };
+        self.ready = true;
         self.buffered_outputs
             .push_back(Output::SdpTransmit(sdp_message));
     }
@@ -130,6 +133,7 @@ impl RTCConnection {
                 msg: Sdp::Offer(offer),
             }));
 
+        self.ready = true;
         self.state = State::Offer { pending };
     }
 
@@ -172,9 +176,11 @@ impl RTCConnection {
                 info!("Channel not yet open, cannot send data");
             }
         }
+        self.ready = true;
     }
 
     pub fn handle_input(&mut self, input: Receive) {
+        self.ready = true;
         match input {
             Receive::Rtc(input) => {
                 trace!("Handle Rtc input: {:?}", input);
@@ -228,6 +234,7 @@ impl RTCConnection {
     }
 
     pub fn poll_output(&mut self) -> Output {
+        assert!(self.ready);
         if let State::Invalid = self.state {
             panic!("invalid state in poll");
         }
@@ -268,6 +275,9 @@ impl RTCConnection {
                     _ => trace!("received unprocessed event: {:?}", event),
                 }
             }
+        }
+        if self.buffered_outputs.is_empty() {
+            self.ready = false;
         }
         self.buffered_outputs
             .pop_front()

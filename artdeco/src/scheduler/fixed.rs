@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use nid::Nanoid;
 
 use crate::{
+    offloader::TIMEOUT,
     scheduler::{Output, Scheduler},
     task::{Task, TaskResult},
 };
@@ -62,7 +63,9 @@ impl Scheduler<()> for Fixed {
     }
 
     fn poll_output(&mut self) -> super::Output<()> {
-        if let Some(dest) = self.fixed_uuid {
+        if let Some(dest) = self.fixed_uuid
+            && !self.task_list.is_empty()
+        {
             match self.connected {
                 ConnectionStatus::Disconnected => {
                     self.connected = ConnectionStatus::WaitingForConnection;
@@ -76,7 +79,7 @@ impl Scheduler<()> for Fixed {
                 ConnectionStatus::WaitingForConnection => {}
             }
         }
-        Output::Timeout(self.last_instant + Duration::from_secs(10))
+        Output::Timeout(self.last_instant + TIMEOUT)
     }
 
     fn schedule(&mut self, task: Task<()>) {

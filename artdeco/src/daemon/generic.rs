@@ -83,6 +83,10 @@ pub async fn daemon<
     let mut active_tasks: Slab<AssociatedData<S, D>> = Slab::new();
 
     let mut fused_task_queue = task_queue.fuse();
+    let mut fused_sdp_stream = sdp_stream.fuse();
+    let mut fused_provider_stream = provider_stream.fuse();
+    let sleep = sleep_until(Instant::now().into());
+    tokio::pin!(sleep);
 
     loop {
         let next_timeout = match offloader.poll_output() {
@@ -117,52 +121,49 @@ pub async fn daemon<
             }
         };
 
+        sleep.as_mut().reset(next_timeout.into());
+
         tokio::select! {
             // poll task queue
-            task = fused_task_queue.next() => {
-                if let Some(next_task) = task {
-                    trace!("task queue new task");
-                    // offload task using offloader
-                    // deconstruct Workload, insert channel into slab, create new task
-                    let task = next_task.into_task(&mut active_tasks);
-                    offloader.handle_task(task);
-                }
+            Some(next_task) = fused_task_queue.next() => {
+                trace!("task queue new task");
+                // offload task using offloader
+                // deconstruct Workload, insert channel into slab, create new task
+                let task = next_task.into_task(&mut active_tasks);
+                offloader.handle_task(task);
+                trace!("task future completes");
             }
             // poll announce stream for new providers
-            announce = provider_stream.next() => {
-                if let Some(announce_str) = announce {
-                    let announce_str: String = announce_str;
-                    trace!("announce stream event {:?}", announce_str);
-                    match serde_json::from_str(&announce_str) {
-                        Ok(announce_msg_parsed) => {
-                            let pa = ProviderAnnounce {
-                                announce: announce_msg_parsed,
-                                last: Instant::now(),
-                            };
-                            offloader.handle_announce(pa);
-                        },
-                        Err(error) => {
-                            error!("error during announce message parsing, {}", error);
-                            continue;
-                        }
+            Some(announce_str) = fused_provider_stream.next() => {
+                let announce_str: String = announce_str;
+                trace!("announce stream event {:?}", announce_str);
+                match serde_json::from_str(&announce_str) {
+                    Ok(announce_msg_parsed) => {
+                        let pa = ProviderAnnounce {
+                            announce: announce_msg_parsed,
+                            last: Instant::now(),
+                        };
+                        offloader.handle_announce(pa);
+                    },
+                    Err(error) => {
+                        error!("error during announce message parsing, {}", error);
                     }
                 }
+                trace!("announce future completes");
             }
             // poll sdp rendezvouz for new messages
-            sdp_message = sdp_stream.next() => {
-                if let Some(sdp_message_str) = sdp_message {
-                    let sdp_message_str: String = sdp_message_str;
-                    trace!("sdp stream event {:?}", sdp_message_str);
-                    match serde_json::from_str(&sdp_message_str) {
-                        Ok(sdp_msg_parsed) => {
-                            offloader.handle_sdp(sdp_msg_parsed);
-                        },
-                        Err(error) => {
-                            error!("error during sdp message parsing, {}", error);
-                            continue;
-                        }
+            Some(sdp_message_str) = fused_sdp_stream.next() => {
+                let sdp_message_str: String = sdp_message_str;
+                trace!("sdp stream event {:?}", sdp_message_str);
+                match serde_json::from_str(&sdp_message_str) {
+                    Ok(sdp_msg_parsed) => {
+                        offloader.handle_sdp(sdp_msg_parsed);
+                    },
+                    Err(error) => {
+                        error!("error during sdp message parsing, {}", error);
                     }
                 }
+                trace!("announce sdp completes");
             }
             // poll udp socket
             udp_result = udp_socket.recv_from(&mut udp_buffer) => {
@@ -182,7 +183,6 @@ pub async fn daemon<
                                 },
                                 Err(error) => {
                                     error!("error during udp buffer to datagram transform, {}", error);
-                                    continue;
                                 }
                             }
                         }
@@ -191,15 +191,17 @@ pub async fn daemon<
                         return Err(e.into());
                     }
                 }
+                trace!("announce udp completes");
             }
             // poll timeout
-            _ = sleep_until(next_timeout.into()) => {
+            _ = &mut sleep => {
                 if fused_task_queue.is_done() && active_tasks.is_empty(){
                     return Ok(())
                 }
                 trace!("next timeout for offloader");
-                offloader.handle_input(Input::Timeout(Instant::now()));
             }
         }
+        trace!("current time {:?}", Instant::now());
+        offloader.handle_input(Input::Timeout(Instant::now()));
     }
 }

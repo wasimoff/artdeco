@@ -23,8 +23,6 @@ use crate::{
     task::{Task, TaskResult},
 };
 
-use lazy_static::lazy_static;
-
 pub enum Input<'a> {
     SocketReceive(Instant, Box<UdpReceive<'a>>),
     Timeout(Instant),
@@ -51,9 +49,7 @@ impl<'a> UdpReceive<'a> {
     }
 }
 
-lazy_static! {
-    pub(crate) static ref TIMEOUT: Instant = Instant::now() + Duration::from_secs(600);
-}
+pub const TIMEOUT: Duration = Duration::from_secs(600);
 
 pub(crate) enum Receive<'a> {
     Stun(message::Message<'a>),
@@ -152,6 +148,7 @@ pub struct Offloader<S, M> {
     provider_manager: ProviderManager<M>,
     scheduler: S,
     last_instant: Instant,
+    ready: bool,
 }
 
 impl<M, S: Scheduler<M>> Offloader<S, M> {
@@ -161,15 +158,19 @@ impl<M, S: Scheduler<M>> Offloader<S, M> {
             provider_manager: ProviderManager::new(),
             scheduler,
             last_instant: Instant::now(),
+            ready: true,
         }
     }
 
     pub fn handle_sdp(&mut self, sdp_message: SdpMessage) {
         self.connection_manager.handle_sdp(sdp_message);
+        self.ready = true;
     }
 
     pub fn handle_announce(&mut self, announce: ProviderAnnounce) {
+        debug!("received announce for {}", announce.announce.id);
         self.scheduler.handle_announce(announce);
+        self.ready = true;
         //self.handle_input(input);
     }
 
@@ -183,20 +184,21 @@ impl<M, S: Scheduler<M>> Offloader<S, M> {
                 self.update_instant(instant);
             }
             Input::Timeout(instant) => {
-                self.connection_manager.handle_input(connection::Input {
-                    inner: InputInner::Timeout,
-                    instant,
-                });
                 self.update_instant(instant);
             }
         }
     }
 
     fn update_instant(&mut self, instant: Instant) {
+        self.connection_manager.handle_input(connection::Input {
+            inner: InputInner::Timeout,
+            instant,
+        });
         self.provider_manager
             .handle_input(provider::Input::Timeout(instant));
         self.scheduler.handle_timeout(instant);
         self.last_instant = instant;
+        self.ready = true;
     }
 
     pub fn handle_task(&mut self, mut task: Task<M>) {
@@ -205,12 +207,18 @@ impl<M, S: Scheduler<M>> Offloader<S, M> {
             .trace
             .push(crate::task::TraceEvent::SchedulerEnter(Instant::now()));
         self.scheduler.schedule(task);
+        self.ready = true;
     }
 
     pub fn poll_output(&mut self) -> Output<M> {
-        let mut next_timeout = *TIMEOUT;
+        let mut next_timeout = self.last_instant + TIMEOUT;
+        assert!(self.ready);
+
         match self.scheduler.poll_output() {
-            scheduler::Output::Timeout(instant) => next_timeout = next_timeout.min(instant),
+            scheduler::Output::Timeout(instant) => {
+                trace!("Timeout from scheduler {:?}", instant);
+                next_timeout = next_timeout.min(instant)
+            }
             scheduler::Output::Connect(uuid) => {
                 trace!("received connection request for {} from scheduler", uuid);
                 self.connection_manager.handle_input(connection::Input {
@@ -248,11 +256,17 @@ impl<M, S: Scheduler<M>> Offloader<S, M> {
                     error!("cannot send to {} because of {}", uuid, err);
                 }
             }
-            provider::Output::Timeout(instant) => next_timeout = next_timeout.min(instant),
+            provider::Output::Timeout(instant) => {
+                trace!("Timeout from provider {:?}", instant);
+                next_timeout = next_timeout.min(instant)
+            }
         }
 
         match self.connection_manager.poll_output() {
-            connection::Output::Timeout(instant) => next_timeout = next_timeout.min(instant),
+            connection::Output::Timeout(instant) => {
+                trace!("Timeout from connection {:?}", instant);
+                next_timeout = next_timeout.min(instant)
+            }
             connection::Output::Message(instant, data_event) => {
                 trace!("Received data event {:?}", data_event);
                 self.provider_manager
@@ -261,7 +275,8 @@ impl<M, S: Scheduler<M>> Offloader<S, M> {
                         data_event.destination,
                         data_event.data,
                     ));
-                return Output::Timeout(self.last_instant);
+                trace!("Timeout from message {:?}", self.last_instant);
+                next_timeout = self.last_instant;
             }
             connection::Output::SdpTransmit(sdp_message) => {
                 return Output::SdpTransmit(sdp_message);
@@ -275,7 +290,8 @@ impl<M, S: Scheduler<M>> Offloader<S, M> {
                     ProviderState::Connected,
                     self.last_instant,
                 );
-                return Output::Timeout(self.last_instant);
+                trace!("Timeout from channel open {:?}", self.last_instant);
+                next_timeout = self.last_instant;
             }
             connection::Output::ChannelClosed(nanoid) => {
                 self.scheduler.handle_provider_state(
@@ -283,10 +299,12 @@ impl<M, S: Scheduler<M>> Offloader<S, M> {
                     ProviderState::Disconnected,
                     self.last_instant,
                 );
-                return Output::Timeout(self.last_instant);
+                trace!("Timeout from channel closed {:?}", self.last_instant);
+                next_timeout = self.last_instant;
             }
         }
 
+        self.ready = false;
         Output::Timeout(next_timeout)
     }
 }

@@ -77,6 +77,7 @@ pub struct RtcConnectionManager {
     stun_server: SocketAddr,
     local_addr: SocketAddr,
     base_instant: std::time::Instant,
+    ready: bool,
 }
 
 impl RtcConnectionManager {
@@ -95,6 +96,7 @@ impl RtcConnectionManager {
             stun_server,
             local_addr,
             base_instant,
+            ready: true,
         }
     }
 
@@ -150,6 +152,7 @@ impl RtcConnectionManager {
             .get_mut(&destination)
             .filter(|con| (*con).is_connected())
         {
+            self.ready = true;
             con.send_data(data);
             Ok(())
         } else {
@@ -169,6 +172,7 @@ impl RtcConnectionManager {
 
     pub fn handle_sdp(&mut self, sdp_message: SdpMessage) {
         if let Some(connection) = self.rtc_connections.get_mut(&sdp_message.source) {
+            self.ready = true;
             connection.handle_input(rtc_connection::Receive::Sdp(sdp_message));
         }
     }
@@ -176,6 +180,7 @@ impl RtcConnectionManager {
     pub fn handle_input(&mut self, input: Input) {
         let Input { inner, instant } = input;
         self.last_instant = instant;
+        self.ready = true;
 
         match inner {
             InputInner::SocketReceive(receive) => {
@@ -257,7 +262,8 @@ impl RtcConnectionManager {
     }
 
     pub fn poll_output(&mut self) -> Output {
-        let mut smallest_timeout = *TIMEOUT;
+        let mut smallest_timeout = self.last_instant + TIMEOUT;
+        assert!(self.ready);
 
         // poll all rtc connections
         for (key, connection) in &mut self.rtc_connections {
@@ -282,6 +288,7 @@ impl RtcConnectionManager {
                     ));
                 }
                 rtc_connection::Output::Timeout(instant) => {
+                    trace!("Timeout from single connection {:?}", instant);
                     smallest_timeout = smallest_timeout.min(instant);
                 }
                 rtc_connection::Output::ChannelOpen => {
@@ -294,6 +301,7 @@ impl RtcConnectionManager {
         }
 
         let last_instant = from_std(self.base_instant, self.last_instant);
+        trace!("STUN last_instant {}", last_instant);
         match self.stun_agent.poll(last_instant) {
             StunAgentPollRet::TransactionTimedOut(transaction_id)
             | StunAgentPollRet::TransactionCancelled(transaction_id) => {
@@ -307,11 +315,17 @@ impl RtcConnectionManager {
                     self.output_buffer
                         .push_back(Output::UdpTransmit(transmit.into()));
                 } else {
-                    smallest_timeout = smallest_timeout.min(to_std(last_instant, self.base_instant))
+                    trace!("STUN timeout until {}", instant);
+                    let inst = to_std(instant, self.base_instant);
+                    trace!("Timeout from stun {:?}", inst);
+                    smallest_timeout = smallest_timeout.min(inst);
                 }
             }
         }
 
+        if self.output_buffer.is_empty() {
+            self.ready = false;
+        }
         self.output_buffer
             .pop_front()
             .unwrap_or(Output::Timeout(smallest_timeout))
@@ -320,9 +334,9 @@ impl RtcConnectionManager {
 
 fn to_std(
     sans_io_instant: sans_io_time::Instant,
-    base_instant: ::std::time::Instant,
-) -> ::std::time::Instant {
-    let duration_since = ::core::time::Duration::from_nanos(
+    base_instant: std::time::Instant,
+) -> std::time::Instant {
+    let duration_since = std::time::Duration::from_nanos(
         sans_io_instant
             .as_nanos()
             .try_into()
@@ -332,10 +346,43 @@ fn to_std(
 }
 
 fn from_std(
-    base_instant: ::std::time::Instant,
-    target_instant: ::std::time::Instant,
+    base_instant: std::time::Instant,
+    target_instant: std::time::Instant,
 ) -> sans_io_time::Instant {
-    let duration_since = target_instant - base_instant;
-    let sans_io_time = sans_io_time::Instant::from_std(base_instant);
-    sans_io_time + duration_since
+    let duration_since = target_instant.saturating_duration_since(base_instant);
+    sans_io_time::Instant::from_nanos(duration_since.as_nanos() as i64)
+}
+
+#[cfg(test)]
+mod test {
+    use std::time::Duration;
+
+    #[test]
+    fn test_from_to_std() {
+        use super::*;
+
+        let base = std::time::Instant::now();
+        let offset = Duration::from_millis(1000);
+        let target = base + offset;
+
+        // Test from_std conversion
+        let sans_io_instant = from_std(base, target);
+        assert_eq!(sans_io_instant.as_nanos(), offset.as_nanos() as i64);
+
+        // Test to_std conversion
+        let converted_back = to_std(sans_io_instant, base);
+        assert_eq!(converted_back, target);
+
+        // Test round-trip conversion
+        let original = std::time::Instant::now();
+        let sans_io = from_std(base, original);
+        let back_to_std = to_std(sans_io, base);
+        assert_eq!(back_to_std, original);
+
+        // Test with zero duration
+        let zero_target = base;
+        let zero_sans_io = from_std(base, zero_target);
+        let zero_back = to_std(zero_sans_io, base);
+        assert_eq!(zero_back, zero_target);
+    }
 }

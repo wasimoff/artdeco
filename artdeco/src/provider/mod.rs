@@ -6,6 +6,7 @@ use std::{
 use nid::Nanoid;
 
 use crate::{
+    offloader::TIMEOUT,
     provider::wasimoff::{WasimoffConfig, WasimoffProvider},
     task::{Task, TaskMetrics, TaskResult},
 };
@@ -86,7 +87,7 @@ impl<M> ProviderManager<M> {
     }
 
     pub fn poll_output(&mut self) -> Output<M> {
-        let mut smallest_timeout = self.last_instant + Duration::from_secs(10);
+        let mut smallest_timeout = self.last_instant + TIMEOUT;
 
         for (id, provider) in &mut self.wasimoff_providers {
             match provider.poll_output() {

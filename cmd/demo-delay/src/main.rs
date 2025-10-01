@@ -7,6 +7,7 @@ use artdeco::{
 };
 use futures::{StreamExt, channel::mpsc};
 
+use tokio::time::sleep;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -27,6 +28,15 @@ async fn main() -> anyhow::Result<()> {
     // Create response queue
     let (response_sender, mut response_receiver) = mpsc::channel(2);
 
+    tokio::spawn(async move {
+        // Create a scheduler
+        let scheduler = Fixed::new();
+        let args: Vec<String> = std::env::args().collect();
+        let binding = "artdeco.devpi.de".to_string();
+        let nats_url = args.get(1).unwrap_or(&binding);
+        daemon_nats(receiver, scheduler, nats_url).await.unwrap();
+    });
+
     // Create a workload
     let exec = TaskExecutable::new(FIBBONACCI_WASM as &[u8]);
     let workload = Workload {
@@ -38,18 +48,15 @@ async fn main() -> anyhow::Result<()> {
         metrics_type: PhantomData {},
     };
 
+    // wait 8 seconds for provider announcements
+    sleep(Duration::from_secs(12)).await;
+
+    info!("Sending Tasks");
     // Send the workload to the queue
     sender.start_send(workload.clone())?;
     sender.start_send(workload)?;
-    drop(sender); // drop sender so the daemon stops after offloading all tasks
+    drop(sender); // drop sender so the daemon stops after offloading all tasks    
 
-    // Create a scheduler
-    let scheduler = Fixed::new();
-    //let receiver_stream = ReceiverStream::new(receiver);
-    let args: Vec<String> = std::env::args().collect();
-    let binding = "artdeco.devpi.de".to_string();
-    let nats_url = args.get(1).unwrap_or(&binding);
-    daemon_nats(receiver, scheduler, nats_url).await?;
     let first_result = response_receiver.next().await.unwrap();
     let second_result = response_receiver.next().await.unwrap();
 
