@@ -54,8 +54,8 @@ pub async fn daemon<
     S: Sink<WorkloadResult<D, M>, Error = impl Display> + Unpin,
 >(
     task_queue: impl Stream<Item = Workload<S, D, M>> + Unpin,
-    mut provider_stream: impl Stream<Item = String> + Unpin,
-    mut sdp_stream: impl Stream<Item = String> + Unpin,
+    provider_stream: impl Stream<Item = String> + Unpin,
+    sdp_stream: impl Stream<Item = String> + Unpin,
     mut sdp_sink: impl Sink<String, Error = impl Display> + Unpin,
     scheduler: impl Scheduler<M>,
 ) -> anyhow::Result<()> {
@@ -100,7 +100,10 @@ pub async fn daemon<
                     .send_to(&transmit.contents, transmit.destination)
                     .await
                 {
-                    error!("error during UDP socket send, {}", error);
+                    error!(
+                        "error during UDP socket send, {}, packet destination: {}",
+                        error, transmit.destination
+                    );
                 }
                 continue;
             }
