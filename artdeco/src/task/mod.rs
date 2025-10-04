@@ -146,7 +146,7 @@ pub struct TaskResult<M> {
     pub metrics: TaskMetrics<M>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {
     Error(String),
     QoSError(String),

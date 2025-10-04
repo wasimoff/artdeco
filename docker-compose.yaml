@@ -10,15 +10,15 @@ services:
       - "./nats.conf:/etc/nats/nats.conf:ro"
 
   provider-1:
-    image: ghcr.io/wasimoff/provider:nightly
+    image: ghcr.io/wasimoff/provider:latest
     restart: unless-stopped
-    command: ["--url", "ad://nats:8080/?announce=5", "--workers", "2"]
+    command: ["--url", "ad://nats:8080/?announce=5", "--workers", "1"]
     depends_on:
       - nats
 
   provider-2:
-    image: ghcr.io/wasimoff/provider:nightly
+    image: ghcr.io/wasimoff/provider:latest
     restart: unless-stopped
-    command: ["--url", "ad://nats:8080/?announce=5", "--workers", "2"]
+    command: ["--url", "ad://nats:8080/?announce=5", "--workers", "1"]
     depends_on:
       - nats

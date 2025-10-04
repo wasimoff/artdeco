@@ -5,7 +5,7 @@ use std::{
 
 use nid::Nanoid;
 use protobuf::{Message, MessageField, MessageFull, well_known_types::any::Any};
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 
 use crate::{protocol::wasimoff, task::Task};
 use crate::{protocol::wasimoff::Envelope, provider::TaskMetrics};
@@ -75,7 +75,7 @@ impl<M> WasimoffProvider<M> {
         }
         let mut pending_task = pending_task.unwrap();
 
-        debug!("Received envelope payload {:?}", envelope.payload);
+        trace!("Received envelope {:?}", envelope);
         let task_response: wasip1::Response = envelope.payload.unpack().unwrap().unwrap();
         let result = task_response.result.unwrap();
 

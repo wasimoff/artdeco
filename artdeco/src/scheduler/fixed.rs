@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use nid::Nanoid;
+use tracing::debug;
 
 use crate::{
     offloader::TIMEOUT,
@@ -91,6 +92,7 @@ impl Scheduler<()> for Fixed {
         _uuid: Nanoid,
         task_result: TaskResult<()>,
     ) -> Option<TaskResult<()>> {
+        debug!("Scheduler task result {:?}", task_result);
         Some(task_result)
     }
 }

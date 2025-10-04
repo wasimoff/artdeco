@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use artdeco::{
     daemon::nats::daemon_nats,
     scheduler::fixed::Fixed,
-    task::{TaskExecutable, Workload},
+    task::{Status, TaskExecutable, Workload},
 };
 use futures::{StreamExt, channel::mpsc};
 
@@ -21,9 +21,9 @@ async fn main() -> anyhow::Result<()> {
         .unwrap();
 
     // Create a task queue
-    let (mut sender, receiver) = mpsc::channel(1);
+    let (mut sender, receiver) = mpsc::channel(2);
     // Create response queue
-    let (response_sender, mut response_receiver) = mpsc::channel(1);
+    let (response_sender, mut response_receiver) = mpsc::channel(2);
 
     // Create a workload
     let exec = TaskExecutable::new(FIBBONACCI_WASM as &[u8]);
@@ -37,6 +37,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Send the workload to the queue
+    sender.start_send(workload.clone())?;
     sender.start_send(workload)?;
     drop(sender); // drop sender so the daemon stops after offloading all tasks
 
@@ -48,6 +49,12 @@ async fn main() -> anyhow::Result<()> {
     let nats_url = args.get(1).unwrap_or(&binding);
     daemon_nats(receiver, scheduler, nats_url).await?;
     let result = response_receiver.next().await.unwrap();
+    let result2 = response_receiver.next().await.unwrap();
     info!("received response in main, {:?}", result);
+    assert_eq!(
+        result.status,
+        Status::QoSError("qos: no idle workers for immediate mode".to_string())
+    );
+    info!("received response in main, {:?}", result2);
     Ok(())
 }
