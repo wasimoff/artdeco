@@ -13,7 +13,7 @@ use tracing::{error, info, trace};
 
 use crate::{
     connection::rtc_connection::RTCConnectionConfig,
-    offloader::{self, Input, Offloader, ProviderAnnounce, UdpReceive},
+    consumer::{self, Input, Consumer, ProviderAnnounce, UdpReceive},
     scheduler::Scheduler,
     task::{AssociatedData, Workload, WorkloadResult},
 };
@@ -78,7 +78,7 @@ pub async fn daemon<
         .unwrap()
         .next()
         .unwrap();
-    let mut offloader = Offloader::new(rtc_config, scheduler, google_stun_addr);
+    let mut offloader = Consumer::new(rtc_config, scheduler, google_stun_addr);
     let mut udp_buffer = vec![0; 2000];
     let mut active_tasks: Slab<AssociatedData<S, D>> = Slab::new();
 
@@ -90,11 +90,11 @@ pub async fn daemon<
 
     loop {
         let next_timeout = match offloader.poll_output() {
-            offloader::Output::Timeout(instant) => {
+            consumer::Output::Timeout(instant) => {
                 trace!("offloader timeout {:?}", instant);
                 instant
             }
-            offloader::Output::SocketTransmit(transmit) => {
+            consumer::Output::SocketTransmit(transmit) => {
                 trace!("offloader socket transmit {:?}", transmit);
                 if let Err(error) = udp_socket
                     .send_to(&transmit.contents, transmit.destination)
@@ -107,14 +107,14 @@ pub async fn daemon<
                 }
                 continue;
             }
-            offloader::Output::SdpTransmit(sdp_transmit) => {
+            consumer::Output::SdpTransmit(sdp_transmit) => {
                 trace!("offloader sdp transmit {:?}", sdp_transmit);
                 if let Err(error) = sdp_sink.send(sdp_transmit).await {
                     error!("error during send of sdp transmit, {}", error);
                 }
                 continue;
             }
-            offloader::Output::TaskResult(result) => {
+            consumer::Output::TaskResult(result) => {
                 trace!("received result: {:?}", result);
                 let (mut channel, workload_result) = result.into_workload_result(&mut active_tasks);
                 if let Err(err) = channel.send(workload_result).await {

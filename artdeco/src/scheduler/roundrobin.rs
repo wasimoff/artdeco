@@ -1,5 +1,5 @@
 use crate::{
-    offloader::ProviderAnnounce,
+    consumer::ProviderAnnounce,
     scheduler::{Output, ProviderState, Scheduler},
     task::{Task, TaskResult, WasimoffTraceEvent},
 };
@@ -181,7 +181,7 @@ impl Scheduler<RoundRobinMetrics> for RoundRobin {
 mod test {
     use super::*;
     use crate::{
-        offloader::ProviderAnnounceMsg,
+        consumer::ProviderAnnounceMsg,
         scheduler::{Output, ProviderState, Scheduler},
         task::{Task, TaskExecutable, TaskId, TaskMetrics},
     };

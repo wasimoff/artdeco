@@ -3,7 +3,7 @@ use std::time::Instant;
 use nid::Nanoid;
 
 use crate::{
-    offloader::ProviderAnnounce,
+    consumer::ProviderAnnounce,
     task::{Task, TaskResult},
 };
 

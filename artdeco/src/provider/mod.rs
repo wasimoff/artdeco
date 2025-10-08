@@ -6,7 +6,7 @@ use std::{
 use nid::Nanoid;
 
 use crate::{
-    offloader::TIMEOUT,
+    consumer::TIMEOUT,
     provider::wasimoff::{WasimoffConfig, WasimoffProvider},
     task::{Task, TaskMetrics, TaskResult},
 };

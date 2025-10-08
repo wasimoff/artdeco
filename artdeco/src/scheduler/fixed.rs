@@ -4,7 +4,7 @@ use nid::Nanoid;
 use tracing::debug;
 
 use crate::{
-    offloader::TIMEOUT,
+    consumer::TIMEOUT,
     scheduler::{Output, Scheduler},
     task::{Task, TaskResult},
 };
@@ -44,7 +44,7 @@ impl Scheduler<()> for Fixed {
         self.last_instant = instant;
     }
 
-    fn handle_announce(&mut self, announce: crate::offloader::ProviderAnnounce) {
+    fn handle_announce(&mut self, announce: crate::consumer::ProviderAnnounce) {
         if self.fixed_uuid.is_none() {
             self.fixed_uuid = Some(announce.announce.id);
         }

@@ -143,7 +143,7 @@ pub struct ProviderAnnounce {
     pub last: Instant,
 }
 
-pub struct Offloader<S, M> {
+pub struct Consumer<S, M> {
     connection_manager: RtcConnectionManager,
     provider_manager: ProviderManager<M>,
     scheduler: S,
@@ -151,7 +151,7 @@ pub struct Offloader<S, M> {
     ready: bool,
 }
 
-impl<M, S: Scheduler<M>> Offloader<S, M> {
+impl<M, S: Scheduler<M>> Consumer<S, M> {
     pub fn new(rtc_config: RTCConnectionConfig, scheduler: S, stun_server: SocketAddr) -> Self {
         Self {
             connection_manager: RtcConnectionManager::new(rtc_config, stun_server),

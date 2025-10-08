@@ -28,10 +28,10 @@ use tracing::debug;
 use tracing::trace;
 
 use crate::connection::rtc_connection::SdpMessage;
-use crate::offloader;
-use crate::offloader::TIMEOUT;
-use crate::offloader::UdpReceive;
-use crate::offloader::UdpTransmit;
+use crate::consumer;
+use crate::consumer::TIMEOUT;
+use crate::consumer::UdpReceive;
+use crate::consumer::UdpTransmit;
 
 pub mod rtc_connection;
 
@@ -190,7 +190,7 @@ impl RtcConnectionManager {
                     contents,
                 } = *receive;
                 match contents {
-                    offloader::Receive::Stun(message) => {
+                    consumer::Receive::Stun(message) => {
                         // check if stun client can handle message, else forward to rtc
                         match self.stun_agent.handle_stun(message, source) {
                             HandleStunReply::Drop(message)
@@ -201,7 +201,7 @@ impl RtcConnectionManager {
                                 let input = InputInner::SocketReceive(Box::new(UdpReceive {
                                     source,
                                     destination,
-                                    contents: offloader::Receive::Str0m(Box::new(datagram_recv)),
+                                    contents: consumer::Receive::Str0m(Box::new(datagram_recv)),
                                 }));
                                 self.handle_input(Input {
                                     inner: input,
@@ -215,7 +215,7 @@ impl RtcConnectionManager {
                             }
                         }
                     }
-                    offloader::Receive::Str0m(datagram_recv) => {
+                    consumer::Receive::Str0m(datagram_recv) => {
                         let rtc_input = rtc_connection::Receive::Rtc(str0m::Input::Receive(
                             instant,
                             net::Receive {
