@@ -17,7 +17,7 @@ protobuf = "3"
 tokio-stream = "0.1"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-str0m = "0.10"
+str0m = "0.11"
 systemstat = "0.2"
 bytes = "1.10"
 tracing = "0.1"
@@ -28,6 +28,7 @@ stun-proto = { version = "1.0.0-alpha4", features = ["std"] }
 sans-io-time = { version = "0.1" }
 fastrand = "2.3.0"
 lazy_static = "1.5.0"
+bytesize = "2.1.0"
 
 [build-dependencies]
 protobuf-codegen = "3"

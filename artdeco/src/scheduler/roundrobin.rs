@@ -75,24 +75,29 @@ impl RoundRobin {
 
     /// Process pending tasks and generate events
     fn process_pending_tasks(&mut self) {
+        let mut remaining_tasks = VecDeque::new();
+        
         while let Some(task) = self.pending_tasks.pop_front() {
+            // Try to find a connected provider
             if let Some(provider_id) = self.get_next_provider() {
                 if self.is_provider_connected(&provider_id) {
                     // Provider is connected, schedule the task directly
                     self.event_buffer
                         .push_back(Output::Offload(provider_id, task));
                 } else {
-                    // Provider is not connected, connect first then schedule
+                    // Provider is not connected, request connection but don't offload yet
                     self.event_buffer.push_back(Output::Connect(provider_id));
-                    self.event_buffer
-                        .push_back(Output::Offload(provider_id, task));
+                    // Keep the task for later scheduling
+                    remaining_tasks.push_back(task);
                 }
             } else {
-                // No providers available, put the task back and break
-                self.pending_tasks.push_front(task);
-                break;
+                // No providers available, keep the task for later
+                remaining_tasks.push_back(task);
             }
         }
+        
+        // Put back any unscheduled tasks
+        self.pending_tasks = remaining_tasks;
     }
 }
 

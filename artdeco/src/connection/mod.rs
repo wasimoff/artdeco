@@ -34,6 +34,7 @@ use crate::consumer::UdpReceive;
 use crate::consumer::UdpTransmit;
 
 pub mod rtc_connection;
+pub mod packet;
 
 #[derive(Debug)]
 pub struct DataEvent {

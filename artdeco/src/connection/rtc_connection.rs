@@ -9,6 +9,9 @@ use str0m::{
 };
 use tracing::{debug, error, info, trace};
 
+// Import packet fragmentation functionality
+use super::packet::{PacketDefragmenter, fragment_message};
+
 #[derive(Default)]
 pub enum State {
     Invalid,
@@ -73,6 +76,7 @@ pub struct RTCConnection {
     last: Instant,
     remote_uuid: Nanoid,
     ready: bool,
+    defragmenter: PacketDefragmenter,
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +106,7 @@ impl RTCConnection {
             last: start,
             remote_uuid,
             ready: true,
+            defragmenter: PacketDefragmenter::new(),
         }
     }
 
@@ -167,9 +172,21 @@ impl RTCConnection {
                 error!("Cannot send data in invalid state");
             }
             State::ChannelOpen { channel_id } => {
-                trace!("writing to rtc datachannel");
-                if let Err(e) = self.rtc.channel(channel_id).unwrap().write(true, data) {
-                    error!("Failed to send data to channel: {:?}", e);
+                trace!("fragmenting and writing to rtc datachannel");
+
+                // Fragment the message
+                let fragments = fragment_message(data);
+
+                // Send each fragment
+                for fragment in fragments {
+                    if let Err(e) = self
+                        .rtc
+                        .channel(channel_id)
+                        .unwrap()
+                        .write(true, &fragment.data)
+                    {
+                        error!("Failed to send fragment to channel: {:?}", e);
+                    }
                 }
             }
             _ => {
@@ -252,8 +269,16 @@ impl RTCConnection {
                 trace!("received str0m event: {:?}", event);
                 match event {
                     str0m::Event::ChannelData(channel_data) => {
-                        self.buffered_outputs
-                            .push_back(Output::ChannelData(channel_data.data));
+                        // Process incoming data through the defragmenter
+                        if let Err(e) = self.defragmenter.process_bytes(&channel_data.data) {
+                            error!("Failed to process channel data: {:?}", e);
+                        } else {
+                            // Output any complete messages that were assembled
+                            while let Some(complete_message) = self.defragmenter.next_message() {
+                                self.buffered_outputs
+                                    .push_back(Output::ChannelData(complete_message.data));
+                            }
+                        }
                     }
                     str0m::Event::ChannelOpen(channel_id, _label) => {
                         debug!("rtc channel open, {:?}", channel_id);
@@ -426,11 +451,21 @@ mod test {
         }
 
         // Verify that r received the data
-        assert_eq!(r.channel_data, test_data);
+        assert_eq!(
+            r.channel_data,
+            test_data,
+            "received data len {}, sent data len {}",
+            r.channel_data.len(),
+            test_data.len()
+        );
 
         // Send data from r to l
-        let response_data = b"Hello back from r to l!";
-        r.rtc.send_data(response_data);
+        // Generate random data larger than 262144 bytes (256KB)
+        let mut response_data = vec![0u8; 100_000]; // 300KB
+        for (i, byte) in response_data.iter_mut().enumerate() {
+            *byte = (i % 256) as u8;
+        }
+        r.rtc.send_data(&response_data);
 
         // Progress the connections to process the response
         for _ in 0..100 {
@@ -438,6 +473,15 @@ mod test {
         }
 
         // Verify that l received the response data
-        assert_eq!(l.channel_data, response_data);
+        if l.channel_data != response_data {
+            panic!("len 1 {} len 2 {}", l.channel_data.len(), response_data.len())
+        }
+        assert_eq!(
+            l.channel_data,
+            response_data,
+            "received data len {}, sent data len {}",
+            l.channel_data.len(),
+            response_data.len()
+        );
     }
 }

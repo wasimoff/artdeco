@@ -50,7 +50,11 @@ pub async fn wasimoff_broker<M: WasimoffTraceEvent + Debug + Send + Default + 's
     let (mut task_sender, task_receiver) = mpsc::channel::<Workload<M>>(100);
     let (response_sender, response_receiver) = mpsc::channel::<WorkloadResult<CustomData, M>>(100);
 
-    tokio::spawn(daemon_nats(task_receiver, scheduler, nats_url));
+    tokio::spawn(async move {
+        daemon_nats(task_receiver, scheduler, nats_url)
+            .await
+            .unwrap()
+    });
     let mut fused_task_responses = response_receiver.fuse();
 
     loop {

@@ -2,7 +2,7 @@ use std::{fmt::Debug, fmt::Display, pin::pin};
 
 use async_nats::{PublishMessage, Subject, ToServerAddrs};
 use futures::{Sink, SinkExt, Stream, StreamExt};
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::{daemon::generic::daemon, scheduler::Scheduler, task::Workload, task::WorkloadResult};
 
@@ -15,6 +15,7 @@ pub async fn daemon_nats<
     scheduler: impl Scheduler<M>,
     nats_url: impl ToServerAddrs,
 ) -> anyhow::Result<()> {
+    info!("Starting NATS daemon");
     let client = async_nats::connect(nats_url).await?;
     debug!("Connected to NATS server");
 
