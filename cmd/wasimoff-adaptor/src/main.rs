@@ -1,5 +1,6 @@
-use std::{collections::HashMap, fs, path::Path, pin::pin};
+use std::{collections::HashMap, fs, path::Path};
 
+use anyhow::Result;
 use artdeco::{
     daemon::wasimoff::wasimoff_broker,
     scheduler::{fixed::Fixed, roundrobin::RoundRobin},
@@ -7,7 +8,7 @@ use artdeco::{
 };
 use bytes::Bytes;
 use clap::{Parser, ValueEnum, arg, command};
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt, channel::mpsc};
 use tokio::net::TcpListener;
 use tokio_tungstenite::{
     accept_hdr_async,
@@ -49,7 +50,7 @@ enum Scheduler {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     let filter = EnvFilter::new("error")
         .add_directive("artdeco=debug".parse().unwrap())
         .add_directive("wasimoff_adaptor=debug".parse().unwrap())
@@ -60,6 +61,33 @@ async fn main() {
         .unwrap();
 
     let args = Args::parse();
+    let binaries = parse_binaries(args.binaries);
+
+    let (task_sender, task_receiver) = mpsc::channel::<Bytes>(100);
+    let (result_sender, result_receiver) = mpsc::channel::<Bytes>(100);
+
+    let broker_daemon = tokio::spawn(async move {
+        match args.scheduler {
+            Scheduler::Fixed => wasimoff_broker(
+                task_receiver,
+                result_sender,
+                Fixed::new(),
+                args.broker_url,
+                &binaries,
+            )
+            .await
+            .unwrap(),
+            Scheduler::RoundRobin => wasimoff_broker(
+                task_receiver,
+                result_sender,
+                RoundRobin::new(),
+                args.broker_url,
+                &binaries,
+            )
+            .await
+            .unwrap(),
+        }
+    });
 
     let listener = TcpListener::bind(&args.socket).await.unwrap();
     debug!("Initialized websocket at {}", args.socket);
@@ -74,30 +102,26 @@ async fn main() {
     .await
     .unwrap();
 
-    let mapped_stream = ws_stream.filter_map(async |msg| {
-        msg.ok().and_then(|msg| match msg {
-            Message::Binary(bytes) => Some(bytes),
-            _ => None,
+    let (ws_write, ws_read) = ws_stream.split();
+
+    let stream_forward = ws_read
+        .filter_map(|msg| async move {
+            msg.ok().and_then(|msg| match msg {
+                Message::Binary(bytes) => Some(Ok::<_, anyhow::Error>(bytes)),
+                _ => None,
+            })
         })
-    });
-    let mapped_sink = pin![
-        mapped_stream
-            .with::<_, _, _, anyhow::Error>(async |bytes: Bytes| Ok(Message::binary(bytes)))
-    ];
+        .forward(task_sender.sink_err_into());
 
+    let result_forward = result_receiver
+        .map(|item| Ok::<_, anyhow::Error>(Message::binary(item)))
+        .forward(ws_write.sink_err_into());
+
+    tokio::try_join!(stream_forward, result_forward)?;
+
+    broker_daemon.await.unwrap();
     info!("Accepted websocket connection");
-
-    let binaries = parse_binaries(args.binaries);
-    match args.scheduler {
-        Scheduler::Fixed => wasimoff_broker(mapped_sink, Fixed::new(), args.broker_url, &binaries)
-            .await
-            .unwrap(),
-        Scheduler::RoundRobin => {
-            wasimoff_broker(mapped_sink, RoundRobin::new(), args.broker_url, &binaries)
-                .await
-                .unwrap()
-        }
-    }
+    Ok(())
 }
 
 fn parse_binaries(binary_locations: Vec<String>) -> HashMap<String, TaskExecutable> {

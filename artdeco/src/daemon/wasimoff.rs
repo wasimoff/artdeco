@@ -1,7 +1,9 @@
 use std::{
     collections::HashMap,
+    error::Error,
     fmt::Display,
     marker::PhantomData,
+    pin::pin,
     time::{Duration, SystemTime},
 };
 
@@ -15,6 +17,7 @@ use futures::{
 use protobuf::{Message, MessageField, well_known_types::any::Any};
 use tracing::{error, info, trace, warn};
 
+use crate::util::CustomSinkExt;
 use crate::{
     daemon::nats::daemon_nats,
     protocol::wasimoff::{
@@ -28,7 +31,6 @@ use crate::{
     scheduler::Scheduler,
     task::{Status, TaskExecutable, WasimoffTraceEvent, WorkloadResult},
 };
-
 use std::fmt::Debug;
 
 struct CustomData {
@@ -39,56 +41,44 @@ struct CustomData {
 }
 
 pub async fn wasimoff_broker<M: WasimoffTraceEvent + Debug + Send + Default + 'static>(
-    mut datagram_socket: impl Stream<Item = Bytes> + Sink<Bytes, Error = impl Display> + Unpin,
+    datagram_stream: impl Stream<Item = Bytes> + Unpin,
+    datagram_sink: impl Sink<Bytes, Error = impl Display + Send + Sync + Error>
+    + Unpin
+    + Clone
+    + 'static,
     scheduler: impl Scheduler<M> + Send + 'static,
     nats_url: impl ToServerAddrs + Send + 'static,
     executables: &HashMap<String, TaskExecutable>,
 ) -> Result<()> {
     info!("Starting wasimoff broker");
 
-    // Create channels for task queue and responses
-    let (mut task_sender, task_receiver) = mpsc::channel::<Workload<M>>(100);
-    let (response_sender, response_receiver) = mpsc::channel::<WorkloadResult<CustomData, M>>(100);
+    let response_sender = datagram_sink
+        .map(|task_result: WorkloadResult<CustomData, M>| write_to_socket(task_result));
+    let task_stream = pin![datagram_stream.filter_map(async |bytes| {
+        read_from_socket(bytes, response_sender.clone(), executables)
+    })];
 
-    tokio::spawn(async move {
-        daemon_nats(task_receiver, scheduler, nats_url)
-            .await
-            .unwrap()
-    });
-    let mut fused_task_responses = response_receiver.fuse();
-
-    loop {
-        tokio::select! {
-            read_result = datagram_socket.next() => {
-                if let Some(datagram) = read_result {
-                    trace!("received new datagram, {:?}", datagram);
-                    read_from_socket(&datagram, &mut task_sender, response_sender.clone(), executables).await;
-                } else {
-                    break
-                }
-            },
-            task_response = fused_task_responses.next() => {
-                match task_response {
-                    Some(next_response) => write_to_socket(&mut datagram_socket, next_response).await,
-                    None => break,
-                }
-            }
-        }
-    }
+    daemon_nats(task_stream, scheduler, nats_url).await?;
 
     info!("Wasimoff broker shutting down");
     Ok(())
 }
 
-type Workload<M> = crate::task::Workload<Sender<WorkloadResult<CustomData, M>>, CustomData, M>;
-
-async fn read_from_socket<M: WasimoffTraceEvent>(
-    buffer: &[u8],
-    task_queue: &mut Sender<Workload<M>>,
-    back_channel: Sender<WorkloadResult<CustomData, M>>,
+fn read_from_socket<M: WasimoffTraceEvent>(
+    buffer: Bytes,
+    back_channel: impl Sink<WorkloadResult<CustomData, M>, Error = impl Display>
+    + 'static
+    + Clone
+    + Unpin,
     task_executables: &HashMap<String, TaskExecutable>,
-) {
-    match Envelope::parse_from_bytes(buffer) {
+) -> Option<
+    crate::task::Workload<
+        impl Sink<WorkloadResult<CustomData, M>, Error = impl Display> + 'static + Unpin,
+        CustomData,
+        M,
+    >,
+> {
+    match Envelope::parse_from_bytes(&buffer) {
         Ok(envelope) => match envelope.payload.unpack::<wasip1::Request>() {
             Ok(request_opt) => {
                 let request = request_opt.unwrap();
@@ -112,7 +102,7 @@ async fn read_from_socket<M: WasimoffTraceEvent>(
                 let trace = trace.into_option();
 
                 if let Some(executable) = task_executables.get(file_ref) {
-                    let workload = Workload {
+                    let workload = crate::task::Workload {
                         executable: executable.clone(),
                         response_channel: back_channel.clone(),
                         args,
@@ -126,9 +116,7 @@ async fn read_from_socket<M: WasimoffTraceEvent>(
                         metrics_type: PhantomData {},
                     };
 
-                    if let Err(e) = task_queue.send(workload).await {
-                        error!("Failed to send workload to task queue: {}", e);
-                    }
+                    return Some(workload);
                 } else {
                     warn!("ignoring task with unknown binary");
                 }
@@ -142,12 +130,10 @@ async fn read_from_socket<M: WasimoffTraceEvent>(
             error!("Failed to parse envelope: {}", e);
         }
     }
+    return None;
 }
 
-async fn write_to_socket<M: WasimoffTraceEvent>(
-    mut socket: impl Sink<Bytes, Error = impl Display> + Unpin,
-    task_result: WorkloadResult<CustomData, M>,
-) {
+fn write_to_socket<M: WasimoffTraceEvent>(task_result: WorkloadResult<CustomData, M>) -> Bytes {
     let WorkloadResult {
         status,
         metrics,
@@ -203,14 +189,5 @@ async fn write_to_socket<M: WasimoffTraceEvent>(
     envelope.payload = MessageField::some(Any::pack(&response).unwrap());
     envelope.sequence = Some(custom_data.sequence_number);
 
-    match envelope.write_to_bytes() {
-        Ok(serialized) => {
-            if let Err(e) = socket.send(serialized.into()).await {
-                error!("Failed to write response to socket: {}", e);
-            }
-        }
-        Err(e) => {
-            error!("Failed to serialize envelope: {}", e);
-        }
-    }
+    envelope.write_to_bytes().unwrap().into()
 }

@@ -5,6 +5,7 @@ pub mod protocol;
 pub mod provider;
 pub mod scheduler;
 pub mod task;
+mod util;
 
 #[cfg(test)]
 mod test {
