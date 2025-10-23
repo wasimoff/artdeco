@@ -15,9 +15,9 @@ pub mod roundrobin;
 pub enum ProviderState {
     Connected,
     Disconnected,
-    Failure,
 }
 
+#[derive(Debug)]
 pub enum Output<M> {
     /// Scheduler timeout, indicates when `poll_output` should be called next
     Timeout(Instant),

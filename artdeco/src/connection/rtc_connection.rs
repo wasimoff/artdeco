@@ -474,7 +474,11 @@ mod test {
 
         // Verify that l received the response data
         if l.channel_data != response_data {
-            panic!("len 1 {} len 2 {}", l.channel_data.len(), response_data.len())
+            panic!(
+                "len 1 {} len 2 {}",
+                l.channel_data.len(),
+                response_data.len()
+            )
         }
         assert_eq!(
             l.channel_data,

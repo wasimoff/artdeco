@@ -7,7 +7,10 @@ use nid::Nanoid;
 use protobuf::{Message, MessageField, MessageFull, well_known_types::any::Any};
 use tracing::{debug, error, trace};
 
-use crate::{protocol::wasimoff, task::Task};
+use crate::{
+    protocol::wasimoff,
+    task::{Task, TaskExecutable},
+};
 use crate::{protocol::wasimoff::Envelope, provider::TaskMetrics};
 use crate::{protocol::wasimoff::envelope::MessageType, task::TaskResult};
 use crate::{
@@ -42,6 +45,8 @@ pub enum Output<M> {
 struct ActiveTask<M> {
     metrics: TaskMetrics<M>,
     id: TaskId,
+    args: Vec<String>,
+    exec: TaskExecutable,
 }
 
 impl<M> WasimoffProvider<M> {
@@ -94,6 +99,8 @@ impl<M> WasimoffProvider<M> {
                     id: pending_task.id,
                     status,
                     metrics: pending_task.metrics,
+                    executable: pending_task.exec,
+                    args: pending_task.args,
                 });
                 self.pending_outputs.push_back(error_output);
             }
@@ -115,6 +122,8 @@ impl<M> WasimoffProvider<M> {
                         output_file: artifacts.take().map(|mut file| file.take_blob()),
                     },
                     metrics: pending_task.metrics,
+                    executable: pending_task.exec,
+                    args: pending_task.args,
                 });
                 self.pending_outputs.push_back(ok_output);
             }
@@ -179,7 +188,7 @@ impl<M> WasimoffProvider<M> {
 
         let mut params = task::wasip1::Params::new();
         params.binary = MessageField::some(file);
-        params.args = args;
+        params.args = args.clone();
         offload_message.params = MessageField::some(params);
 
         let envelope = self.pack(&offload_message);
@@ -188,8 +197,15 @@ impl<M> WasimoffProvider<M> {
         metrics
             .trace
             .push(crate::task::TraceEvent::WasimoffSerialized(Instant::now()));
-        self.active_offloads
-            .insert(envelope.sequence(), ActiveTask { metrics, id });
+        self.active_offloads.insert(
+            envelope.sequence(),
+            ActiveTask {
+                metrics,
+                id,
+                args,
+                exec: executable,
+            },
+        );
     }
 }
 

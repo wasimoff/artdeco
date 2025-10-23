@@ -1,6 +1,6 @@
 pub mod connection;
-pub mod daemon;
 pub mod consumer;
+pub mod daemon;
 pub mod protocol;
 pub mod provider;
 pub mod scheduler;

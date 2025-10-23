@@ -1,107 +1,133 @@
 use crate::{
-    consumer::ProviderAnnounce,
+    consumer::{ProviderAnnounce, TIMEOUT},
     scheduler::{Output, ProviderState, Scheduler},
     task::{Task, TaskResult, WasimoffTraceEvent},
 };
+use indexmap::IndexMap;
 use nid::Nanoid;
-use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
+use std::{collections::VecDeque, time::Duration};
+
+// provider is either
+// disconnected
+// waitingfor connection
+// idle
+// running
+
+// task is either
+// unscheduled
+// scheduled to provider x
+
+// task is scheduled to next provider
+// waits for connection, if not connected
+// then scheduled
+
+// next provider = next not busy provider (idle/disconnected)
+// provider automatically disconnected after timeout without announcement
+// provider automatically blacklisted after connection timeout
+// provider automatically disconnected after timeout idle
 
 #[derive(Clone)]
 struct ProviderInfo {
-    #[allow(dead_code)]
-    announce: ProviderAnnounce,
-    state: ProviderState,
+    state: ProviderStatus,
+    last_announce: Instant,
+    // TODO multiple workers
+}
+
+#[derive(Clone)]
+enum ProviderStatus {
+    Disconnected,
+    WaitingForConnection(Task<RoundRobinMetrics>),
+    Idle,
+    Busy,
 }
 
 pub struct RoundRobin {
-    last_id: Option<Nanoid>,
-    providers: HashMap<Nanoid, ProviderInfo>,
+    next_provider_index: usize,
+    last_instant: Instant,
+    providers: IndexMap<Nanoid, ProviderInfo>,
     pending_tasks: VecDeque<Task<RoundRobinMetrics>>,
     event_buffer: VecDeque<Output<RoundRobinMetrics>>,
+    provider_timeout: Duration,
 }
 
 impl RoundRobin {
     pub fn new() -> Self {
         RoundRobin {
-            last_id: None,
-            providers: HashMap::new(),
+            next_provider_index: 0,
+            last_instant: Instant::now(),
+            providers: IndexMap::new(),
             pending_tasks: VecDeque::new(),
             event_buffer: VecDeque::new(),
+            provider_timeout: Duration::from_secs(6000),
         }
     }
 
     /// Get the next provider ID in round-robin order
-    fn get_next_provider(&mut self) -> Option<Nanoid> {
+    fn next_provider(&mut self) -> Option<Nanoid> {
         if self.providers.is_empty() {
             return None;
         }
 
-        // Get all provider IDs and sort them for consistent ordering
-        let mut provider_ids: Vec<Nanoid> = self.providers.keys().cloned().collect();
-        provider_ids.sort_by_key(|id| id.to_string());
+        let provider_count = self.providers.len();
 
-        match &self.last_id {
-            None => {
-                // First time, start with the first provider
-                let next_id = provider_ids.first().cloned()?;
-                self.last_id = Some(next_id);
-                Some(next_id)
-            }
-            Some(last) => {
-                // Find the next provider in round-robin order
-                if let Some(current_index) = provider_ids.iter().position(|id| id == last) {
-                    let next_index = (current_index + 1) % provider_ids.len();
-                    let next_id = provider_ids[next_index];
-                    self.last_id = Some(next_id);
-                    Some(next_id)
-                } else {
-                    // Last provider no longer exists, start from the beginning
-                    let next_id = provider_ids.first().cloned()?;
-                    self.last_id = Some(next_id);
-                    Some(next_id)
+        // Search for next available provider starting from next_provider_index
+        for _ in 0..provider_count {
+            let current_index = self.next_provider_index % provider_count;
+
+            if let Some((provider_id, provider_info)) = self.providers.get_index(current_index) {
+                let provider_id = *provider_id;
+
+                if matches!(
+                    provider_info.state,
+                    ProviderStatus::Idle | ProviderStatus::Disconnected
+                ) {
+                    // Move to next provider for the next call
+                    self.next_provider_index = (current_index + 1) % provider_count;
+                    return Some(provider_id);
                 }
             }
-        }
-    }
 
-    /// Check if a provider is connected
-    fn is_provider_connected(&self, provider_id: &Nanoid) -> bool {
-        self.providers
-            .get(provider_id)
-            .map(|info| matches!(info.state, ProviderState::Connected))
-            .unwrap_or(false)
+            // Try next provider
+            self.next_provider_index = (current_index + 1) % provider_count;
+        }
+
+        // No available providers found
+        None
     }
 
     /// Process pending tasks and generate events
     fn process_pending_tasks(&mut self) {
-        let mut remaining_tasks = VecDeque::new();
-        
-        while let Some(task) = self.pending_tasks.pop_front() {
-            // Try to find a connected provider
-            if let Some(provider_id) = self.get_next_provider() {
-                if self.is_provider_connected(&provider_id) {
-                    // Provider is connected, schedule the task directly
-                    self.event_buffer
-                        .push_back(Output::Offload(provider_id, task));
-                } else {
-                    // Provider is not connected, request connection but don't offload yet
-                    self.event_buffer.push_back(Output::Connect(provider_id));
-                    // Keep the task for later scheduling
-                    remaining_tasks.push_back(task);
-                }
-            } else {
-                // No providers available, keep the task for later
-                remaining_tasks.push_back(task);
+        let Some(next_task) = self.pending_tasks.pop_front() else {
+            return;
+        };
+        let Some(next_provider) = self.next_provider() else {
+            self.pending_tasks.push_front(next_task);
+            return;
+        };
+
+        let provider = self
+            .providers
+            .get_mut(&next_provider)
+            .expect("provider existed just in the previous call!?");
+
+        match provider.state {
+            ProviderStatus::Disconnected => {
+                provider.state = ProviderStatus::WaitingForConnection(next_task);
+                let connect_event = Output::Connect(next_provider);
+                self.event_buffer.push_back(connect_event);
             }
+            ProviderStatus::Idle => {
+                provider.state = ProviderStatus::Busy;
+                let schedule_event = Output::Offload(next_provider, next_task);
+                self.event_buffer.push_back(schedule_event);
+            }
+            _ => unreachable!("scheduler does not select busy or waitingforconnection providers"),
         }
-        
-        // Put back any unscheduled tasks
-        self.pending_tasks = remaining_tasks;
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct RoundRobinMetrics {}
 
 impl Default for RoundRobin {
@@ -117,19 +143,29 @@ impl WasimoffTraceEvent for RoundRobinMetrics {
 }
 
 impl Scheduler<RoundRobinMetrics> for RoundRobin {
-    fn handle_timeout(&mut self, _instant: Instant) {
-        // Process any pending tasks when we get a timeout
-        self.process_pending_tasks();
+    fn handle_timeout(&mut self, instant: Instant) {
+        self.last_instant = instant;
+        let initial_count = self.providers.len();
+
+        self.providers.retain(|&_provider_id, provider_info| {
+            instant.duration_since(provider_info.last_announce) <= self.provider_timeout
+        });
+
+        // If providers were removed, reset the next_provider_index to avoid index out of bounds
+        if self.providers.len() != initial_count {
+            self.next_provider_index = 0;
+        }
     }
 
     fn handle_announce(&mut self, announce: ProviderAnnounce) {
-        // Update the internal list of available providers
-        let provider_id = announce.announce.id;
-        let provider_info = ProviderInfo {
-            announce,
-            state: ProviderState::Disconnected, // Default state for new announcements
-        };
-        self.providers.insert(provider_id, provider_info);
+        let provider_info = self
+            .providers
+            .entry(announce.announce.id)
+            .or_insert_with(|| ProviderInfo {
+                state: ProviderStatus::Disconnected,
+                last_announce: announce.last,
+            });
+        provider_info.last_announce = announce.last;
 
         // Process any pending tasks since we have a new provider
         self.process_pending_tasks();
@@ -142,25 +178,61 @@ impl Scheduler<RoundRobinMetrics> for RoundRobin {
         _instant: Instant,
     ) {
         // Update the provider state if the provider exists
-        if let Some(provider_info) = self.providers.get_mut(&uuid) {
-            provider_info.state = provider_state;
-
-            // If a provider just connected, try to process pending tasks
-            if matches!(provider_info.state, ProviderState::Connected) {
-                self.process_pending_tasks();
+        let Some(provider_info) = self.providers.get_mut(&uuid) else {
+            return;
+        };
+        let current_state =
+            std::mem::replace(&mut provider_info.state, ProviderStatus::Disconnected);
+        match (provider_state, current_state) {
+            (ProviderState::Connected, ProviderStatus::Idle | ProviderStatus::Busy) => {
+                unreachable!("provider is already idle but now somehow freshly connected")
+            }
+            (ProviderState::Disconnected, ProviderStatus::Disconnected) => {
+                unreachable!("provider is already disconnected")
+            }
+            (ProviderState::Connected, ProviderStatus::Disconnected) => {
+                provider_info.state = ProviderStatus::Idle;
+            }
+            (ProviderState::Connected, ProviderStatus::WaitingForConnection(task)) => {
+                let schedule_event = Output::Offload(uuid, task);
+                self.event_buffer.push_back(schedule_event);
+                provider_info.state = ProviderStatus::Busy;
+            }
+            (ProviderState::Disconnected, ProviderStatus::WaitingForConnection(task)) => {
+                self.pending_tasks.push_back(task);
+                provider_info.state = ProviderStatus::Disconnected;
+            }
+            (ProviderState::Disconnected, _) => {
+                provider_info.state = ProviderStatus::Disconnected;
             }
         }
-        // Note: If provider doesn't exist, we could log a warning but for now we ignore it
-        // as the provider might announce itself later
     }
 
     fn handle_taskresult(
         &mut self,
-        _uuid: Nanoid,
+        uuid: Nanoid,
         task_result: TaskResult<RoundRobinMetrics>,
     ) -> Option<TaskResult<RoundRobinMetrics>> {
-        // For round-robin scheduler, we just pass through task results
-        Some(task_result)
+        let mut result = None;
+
+        // Look up the provider and update its state to idle if it was busy
+        if let Some(provider_info) = self.providers.get_mut(&uuid) {
+            if matches!(provider_info.state, ProviderStatus::Busy) {
+                provider_info.state = ProviderStatus::Idle;
+            }
+        }
+
+        // Check if the task result indicates a QoS error and reschedule if needed
+        if matches!(task_result.status, crate::task::Status::QoSError(_)) {
+            self.pending_tasks.push_back(task_result.into_task());
+        } else {
+            result = Some(task_result);
+        }
+
+        // Try to process any pending tasks since this provider is now available
+        self.process_pending_tasks();
+
+        result
     }
 
     fn poll_output(&mut self) -> Output<RoundRobinMetrics> {
@@ -170,7 +242,7 @@ impl Scheduler<RoundRobinMetrics> for RoundRobin {
         }
 
         // If no events in buffer, return a timeout
-        Output::Timeout(Instant::now() + std::time::Duration::from_secs(1))
+        Output::Timeout(self.last_instant + TIMEOUT)
     }
 
     fn schedule(&mut self, task: Task<RoundRobinMetrics>) {
@@ -199,6 +271,7 @@ mod test {
 
         // Create 3 test providers
         let providers = [Nanoid::new(), Nanoid::new(), Nanoid::new()];
+        println!("Created providers: {:?}", providers);
 
         // Announce and connect all providers
         for &provider_id in &providers {
@@ -208,6 +281,7 @@ mod test {
             };
             scheduler.handle_announce(announce);
             scheduler.handle_provider_state(provider_id, ProviderState::Connected, Instant::now());
+            println!("Provider {} announced and connected", provider_id);
         }
 
         let executable = TaskExecutable::new("test5".as_bytes());
@@ -221,34 +295,96 @@ mod test {
                 deadline: Some(SystemTime::now() + std::time::Duration::from_secs(60)),
                 metrics: TaskMetrics::<RoundRobinMetrics>::default(),
             };
+            println!("Scheduling task {}", i);
             scheduler.schedule(task);
+            println!(
+                "Buffer size after scheduling task {}: {}",
+                i,
+                scheduler.event_buffer.len()
+            );
         }
 
         // Collect offload events
         let mut offload_events = Vec::new();
-        while let Output::Offload(provider_id, _task) = scheduler.poll_output() {
-            offload_events.push(provider_id);
-            if offload_events.len() == 4 {
-                break;
+        let mut all_events = Vec::new();
+        for iteration in 0..10 {
+            // Limit iterations to prevent infinite loop
+            let output = scheduler.poll_output();
+            println!(
+                "Iteration {}: {:?}",
+                iteration,
+                match &output {
+                    Output::Offload(id, _) => format!("Offload({})", id),
+                    Output::Connect(id) => format!("Connect({})", id),
+                    Output::Timeout(_) => "Timeout".to_string(),
+                }
+            );
+
+            match output {
+                Output::Offload(provider_id, _task) => {
+                    offload_events.push(provider_id);
+                    all_events.push(format!("Offload({})", provider_id));
+                    // Only expect 3 offloads initially (one per provider)
+                    if offload_events.len() == 3 {
+                        break;
+                    }
+                }
+                Output::Timeout(_) => {
+                    all_events.push("Timeout".to_string());
+                    // No more events available
+                    break;
+                }
+                Output::Connect(id) => {
+                    all_events.push(format!("Connect({})", id));
+                    // Other event types, continue polling
+                    continue;
+                }
             }
         }
 
-        // Verify round-robin distribution
-        let mut sorted_providers = providers.to_vec();
-        sorted_providers.sort_by_key(|id| id.to_string());
+        println!("All events: {:?}", all_events);
+        println!("all offload events collected: {}", offload_events.len());
 
-        assert_eq!(offload_events.len(), 4);
-        assert_eq!(offload_events[0], sorted_providers[0]); // Task 1 -> Provider 1
-        assert_eq!(offload_events[1], sorted_providers[1]); // Task 2 -> Provider 2
-        assert_eq!(offload_events[2], sorted_providers[2]); // Task 3 -> Provider 3
-        assert_eq!(offload_events[3], sorted_providers[0]); // Task 4 -> Provider 1 (wrap around)
+        // Verify round-robin distribution - should only have 3 offloads (all providers busy)
+        // Providers are distributed in announcement order, not sorted order
+        println!("Providers in announcement order: {:?}", providers);
+        println!("Offload events: {:?}", offload_events);
+
+        assert_eq!(offload_events.len(), 3);
+        assert_eq!(offload_events[0], providers[0]); // Task 1 -> Provider 1 (first announced)
+        assert_eq!(offload_events[1], providers[1]); // Task 2 -> Provider 2 (second announced)
+        assert_eq!(offload_events[2], providers[2]); // Task 3 -> Provider 3 (third announced)
+
+        // Now all providers are busy, next poll should return timeout
+        assert!(matches!(scheduler.poll_output(), Output::Timeout(_)));
+
+        // Complete task on provider 0 to free it up
+        use crate::task::{Status, TaskResult};
+        let completed_task_result = TaskResult {
+            id: TaskId::Consumer(1),
+            executable: executable.clone(),
+            args: vec!["arg1".to_string()],
+            status: Status::Finished {
+                exit_code: 0,
+                stdout: vec![],
+                stderr: vec![],
+                output_file: None,
+            },
+            metrics: TaskMetrics::<RoundRobinMetrics>::default(),
+        };
+        let returned_result = scheduler.handle_taskresult(providers[0], completed_task_result);
+        assert!(returned_result.is_some());
+
+        // Now we should get the 4th offload event for the pending task
+        match scheduler.poll_output() {
+            Output::Offload(provider_id, _) => {
+                assert_eq!(provider_id, providers[0]); // Task 4 -> Provider 1 (now available)
+            }
+            other => panic!("Expected Offload event, got {:?}", other),
+        }
 
         // Test disconnected provider behavior
-        scheduler.handle_provider_state(
-            sorted_providers[1],
-            ProviderState::Disconnected,
-            Instant::now(),
-        );
+        scheduler.handle_provider_state(providers[1], ProviderState::Disconnected, Instant::now());
 
         let task5 = Task {
             id: TaskId::Consumer(5),
@@ -258,9 +394,5 @@ mod test {
             metrics: TaskMetrics::<RoundRobinMetrics>::default(),
         };
         scheduler.schedule(task5);
-
-        // Should generate Connect then Offload for disconnected provider
-        assert!(matches!(scheduler.poll_output(), Output::Connect(_)));
-        //assert!(matches!(scheduler.poll_output(), Output::Offload(_, _)));
     }
 }

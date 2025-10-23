@@ -13,7 +13,7 @@ use tracing::{error, info, trace};
 
 use crate::{
     connection::rtc_connection::RTCConnectionConfig,
-    consumer::{self, Input, Consumer, ProviderAnnounce, UdpReceive},
+    consumer::{self, Consumer, Input, ProviderAnnounce, UdpReceive},
     scheduler::Scheduler,
     task::{AssociatedData, Workload, WorkloadResult},
 };

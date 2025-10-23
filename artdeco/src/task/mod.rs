@@ -144,6 +144,8 @@ pub struct TaskResult<M> {
     pub id: TaskId,
     pub status: Status,
     pub metrics: TaskMetrics<M>,
+    pub(crate) executable: TaskExecutable,
+    pub(crate) args: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,6 +169,7 @@ impl<M> TaskResult<M> {
             id,
             status,
             metrics,
+            ..
         } = self;
         if let TaskId::Consumer(key) = id {
             let AssociatedData {
@@ -181,6 +184,23 @@ impl<M> TaskResult<M> {
             (response_channel, workload_result)
         } else {
             panic!("should not be called with scheduler tasks");
+        }
+    }
+
+    pub(crate) fn into_task(self) -> Task<M> {
+        let Self {
+            id,
+            status: _,
+            metrics,
+            executable,
+            args,
+        } = self;
+        Task {
+            executable,
+            args,
+            id,
+            deadline: None,
+            metrics,
         }
     }
 }

@@ -33,8 +33,8 @@ use crate::consumer::TIMEOUT;
 use crate::consumer::UdpReceive;
 use crate::consumer::UdpTransmit;
 
-pub mod rtc_connection;
 pub mod packet;
+pub mod rtc_connection;
 
 #[derive(Debug)]
 pub struct DataEvent {

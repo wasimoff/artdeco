@@ -14,7 +14,9 @@ const FIBBONACCI_WASM: &[u8; 59778] = include_bytes!("../fibbonacci.wasm");
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let filter = EnvFilter::new("info").add_directive("artdeco=debug".parse()?).add_directive("stun_types=error".parse()?);
+    let filter = EnvFilter::new("info")
+        .add_directive("artdeco=debug".parse()?)
+        .add_directive("stun_types=error".parse()?);
     let subscriber = tracing_subscriber::fmt().with_env_filter(filter).finish();
     tracing::subscriber::set_global_default(subscriber)
         .map_err(|_err| eprintln!("Unable to set global default subscriber"))
