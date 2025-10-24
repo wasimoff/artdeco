@@ -14,6 +14,7 @@ use futures::{
     Sink, SinkExt, Stream, StreamExt,
     channel::mpsc::{self, Sender},
 };
+use nid::Nanoid;
 use protobuf::{Message, MessageField, well_known_types::any::Any};
 use tracing::{error, info, trace, warn};
 
@@ -142,9 +143,12 @@ fn write_to_socket<M: WasimoffTraceEvent>(task_result: WorkloadResult<CustomData
     let mut response = Wasip1Response::new();
 
     // set metadata
-    let mut info = Metadata::new();
-    info.id = custom_data.task_id;
+    let mut info: Metadata = Metadata::new();
+    info.id = custom_data.task_id.or_else(|| Some("abrakadabra".into()));
     info.reference = custom_data.reference;
+    info.provider = Some("artdeco-wasimoff-adaptor".into());
+    assert!(info.id.is_some());
+    assert!(info.provider.is_some());
     if let Some(executor_id) = metrics.executor_id {
         info.set_provider(executor_id.to_string());
     }

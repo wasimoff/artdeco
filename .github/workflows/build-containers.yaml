@@ -1,0 +1,80 @@
+name: build container images
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule: # nightlies
+    - cron: 30 02 * * *
+  workflow_dispatch: # manual
+
+permissions:
+  packages: write
+  contents: read
+
+env:
+  PLATFORMS: # only native for pull requests
+    ${{ fromJSON('[ "linux/amd64", "linux/amd64,linux/arm64" ]')[ github.event_name != 'pull_request' ] }}
+
+jobs:
+  container:
+    name: build ${{ matrix.target }} image 📦
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [artdeco]
+    steps:
+      - name: checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # for rev-list count
+
+      - name: prepare metadata
+        id: meta
+        shell: bash
+        run: |
+          # count revisions and get abbreviated commit hash
+          COUNT=$(git rev-list --count HEAD)
+          ABBREV=$(git describe --always --abbrev --match '^$' --dirty)
+
+          echo "revcount=${COUNT}" | tee -a $GITHUB_OUTPUT
+          echo "abbrev=${ABBREV}" | tee -a $GITHUB_OUTPUT
+          echo "revision=r${COUNT}-g${ABBREV}" | tee -a $GITHUB_OUTPUT
+
+          # branch name and current date for metadata
+          echo "head=${GITHUB_REF#refs/heads/}" | tee -a $GITHUB_OUTPUT
+          echo "created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" | tee -a $GITHUB_OUTPUT
+
+      - name: setup qemu
+        uses: docker/setup-qemu-action@v3
+
+      - name: setup docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: login to ghcr.io
+        uses: docker/login-action@v3
+        if: ${{ github.event_name != 'pull_request' && steps.meta.outputs.head == 'main' }}
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "build and push: ${{ matrix.target }}"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: ${{ env.PLATFORMS }}
+          push: ${{ github.event_name != 'pull_request' && steps.meta.outputs.head == 'main' }}
+          tags: >-
+            ${{ github.event_name == 'schedule' && format('ghcr.io/wasimoff/{0}:nightly',
+            matrix.target) || format('{0}:latest,{0}:{1}', format('ghcr.io/wasimoff/{0}',
+            matrix.target), steps.meta.outputs.revision) }}
+          labels: |
+            org.opencontainers.image.title=${{ github.event.repository.name }} ${{ matrix.target }}
+            org.opencontainers.image.description=${{ github.event.repository.description }}
+            org.opencontainers.image.url=${{ github.event.repository.html_url }}
+            org.opencontainers.image.source=${{ github.event.repository.clone_url }}
+            org.opencontainers.image.created=${{ steps.meta.outputs.created }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=${{ github.event.repository.license.spdx_id }}
