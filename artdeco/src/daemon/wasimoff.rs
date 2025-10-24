@@ -10,13 +10,9 @@ use std::{
 use anyhow::Result;
 use async_nats::ToServerAddrs;
 use bytes::Bytes;
-use futures::{
-    Sink, SinkExt, Stream, StreamExt,
-    channel::mpsc::{self, Sender},
-};
-use nid::Nanoid;
+use futures::{Sink, Stream, StreamExt};
 use protobuf::{Message, MessageField, well_known_types::any::Any};
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, warn};
 
 use crate::util::CustomSinkExt;
 use crate::{
@@ -43,10 +39,7 @@ struct CustomData {
 
 pub async fn wasimoff_broker<M: WasimoffTraceEvent + Debug + Send + Default + 'static>(
     datagram_stream: impl Stream<Item = Bytes> + Unpin,
-    datagram_sink: impl Sink<Bytes, Error = impl Display + Send + Sync + Error>
-    + Unpin
-    + Clone
-    + 'static,
+    datagram_sink: impl Sink<Bytes, Error = impl Send + Sync + Error> + Unpin + Clone + 'static,
     scheduler: impl Scheduler<M> + Send + 'static,
     nats_url: impl ToServerAddrs + Send + 'static,
     executables: &HashMap<String, TaskExecutable>,
@@ -131,7 +124,7 @@ fn read_from_socket<M: WasimoffTraceEvent>(
             error!("Failed to parse envelope: {}", e);
         }
     }
-    return None;
+    None
 }
 
 fn write_to_socket<M: WasimoffTraceEvent>(task_result: WorkloadResult<CustomData, M>) -> Bytes {

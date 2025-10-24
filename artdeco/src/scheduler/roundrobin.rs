@@ -216,10 +216,10 @@ impl Scheduler<RoundRobinMetrics> for RoundRobin {
         let mut result = None;
 
         // Look up the provider and update its state to idle if it was busy
-        if let Some(provider_info) = self.providers.get_mut(&uuid) {
-            if matches!(provider_info.state, ProviderStatus::Busy) {
-                provider_info.state = ProviderStatus::Idle;
-            }
+        if let Some(provider_info) = self.providers.get_mut(&uuid)
+            && matches!(provider_info.state, ProviderStatus::Busy)
+        {
+            provider_info.state = ProviderStatus::Idle;
         }
 
         // Check if the task result indicates a QoS error and reschedule if needed

@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, VecDeque},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use nid::Nanoid;
