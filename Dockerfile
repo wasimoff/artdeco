@@ -14,9 +14,11 @@ RUN PROTOC_VERSION=$(curl -s https://api.github.com/repos/protocolbuffers/protob
 COPY . .
 RUN cargo build --release --package wasimoff-adaptor
 
+FROM ghcr.io/wasimoff/tracebench:latest AS tracebench
 # Runtime
 FROM debian:bookworm-slim AS artdeco
 
 COPY --from=builder /app/target/release/wasimoff-adaptor /wasimoff-adaptor
+COPY --from=tracebench /wasm /wasm
 ENTRYPOINT ["/wasimoff-adaptor"]
 
