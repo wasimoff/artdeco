@@ -130,14 +130,13 @@ fn write_to_socket(task_result: WorkloadResult<CustomData>) -> Bytes {
 
     // set metadata
     let mut info: Metadata = Metadata::new();
-    info.id = custom_data.task_id.or_else(|| Some("abrakadabra".into()));
+    info.id = custom_data.task_id.or(Some("abrakadabra".into()));
     info.reference = custom_data.reference;
-    info.provider = Some("artdeco-wasimoff-adaptor".into());
+    info.provider = metrics
+        .executor_id
+        .or(Some("artdeco-wasimoff-adaptor".into()));
     assert!(info.id.is_some());
     assert!(info.provider.is_some());
-    if let Some(executor_id) = metrics.executor_id {
-        info.set_provider(executor_id);
-    }
 
     let mut trace = custom_data.trace.take();
     if let Some(trace) = &mut trace {

@@ -2,7 +2,6 @@ use std::time::SystemTime;
 
 use bytes::Bytes;
 use futures::Sink;
-use nid::Nanoid;
 use sha2::{Digest, Sha256};
 use slab::Slab;
 

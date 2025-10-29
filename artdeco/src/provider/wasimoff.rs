@@ -7,7 +7,6 @@ use nid::Nanoid;
 use protobuf::{Message, MessageField, MessageFull, well_known_types::any::Any};
 use tracing::{debug, error, trace};
 
-use crate::{protocol::wasimoff::Envelope, provider::TaskMetrics};
 use crate::{protocol::wasimoff::envelope::MessageType, task::TaskResult};
 use crate::{
     protocol::wasimoff::task::wasip1::{self},
@@ -20,6 +19,10 @@ use crate::{
 use crate::{
     protocol::wasimoff::{self, task::trace_event::EventType},
     task::{Task, TaskExecutable},
+};
+use crate::{
+    protocol::wasimoff::{Envelope, task::Trace},
+    provider::TaskMetrics,
 };
 
 #[derive(PartialEq, Eq, Hash)]
@@ -176,6 +179,8 @@ impl WasimoffProvider {
             }
         };
         metadata.set_id(task_id);
+        let trace = Trace::new();
+        metadata.trace = MessageField::some(trace);
         offload_message.info = MessageField::some(metadata);
 
         // qos
