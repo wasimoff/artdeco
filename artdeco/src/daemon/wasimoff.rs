@@ -136,7 +136,7 @@ fn write_to_socket(task_result: WorkloadResult<CustomData>) -> Bytes {
     assert!(info.id.is_some());
     assert!(info.provider.is_some());
     if let Some(executor_id) = metrics.executor_id {
-        info.set_provider(executor_id.to_string());
+        info.set_provider(executor_id);
     }
 
     let mut trace = custom_data.trace.take();

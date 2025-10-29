@@ -82,8 +82,15 @@ impl WasimoffProvider {
 
         trace!("Received envelope {:?}", envelope);
         let task_response: wasip1::Response = envelope.payload.unpack().unwrap().unwrap();
-        //let response_info = task_response.info.unwrap();
-        //let provider_trace = response_info.trace.unwrap();
+        let response_info = task_response.info.unwrap();
+        if let Some(provider_trace) = &mut response_info.trace.into_option() {
+            pending_task
+                .metrics
+                .wasimoff_trace
+                .append(&mut provider_trace.events);
+        }
+        pending_task.metrics.executor_id = response_info.provider;
+
         let result = task_response.result.unwrap();
 
         pending_task

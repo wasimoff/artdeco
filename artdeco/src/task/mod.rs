@@ -55,7 +55,7 @@ pub struct Task {
 
 #[derive(Debug, Clone, Default)]
 pub struct TaskMetrics {
-    pub executor_id: Option<Nanoid>,
+    pub executor_id: Option<String>,
     pub wasimoff_trace: Vec<wasimoff::task::TraceEvent>,
 }
 
