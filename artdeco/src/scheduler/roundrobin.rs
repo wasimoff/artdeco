@@ -1,7 +1,7 @@
 use crate::{
     consumer::{ProviderAnnounce, TIMEOUT},
     scheduler::{Output, ProviderState, Scheduler},
-    task::{Task, TaskResult, WasimoffTraceEvent},
+    task::{Task, TaskResult},
 };
 use indexmap::IndexMap;
 use nid::Nanoid;
@@ -37,7 +37,7 @@ struct ProviderInfo {
 #[derive(Clone)]
 enum ProviderStatus {
     Disconnected,
-    WaitingForConnection(Task<RoundRobinMetrics>),
+    WaitingForConnection(Task),
     Idle,
     Busy,
 }
@@ -46,8 +46,8 @@ pub struct RoundRobin {
     next_provider_index: usize,
     last_instant: Instant,
     providers: IndexMap<Nanoid, ProviderInfo>,
-    pending_tasks: VecDeque<Task<RoundRobinMetrics>>,
-    event_buffer: VecDeque<Output<RoundRobinMetrics>>,
+    pending_tasks: VecDeque<Task>,
+    event_buffer: VecDeque<Output>,
     provider_timeout: Duration,
 }
 
@@ -127,22 +127,13 @@ impl RoundRobin {
     }
 }
 
-#[derive(Default, Debug, Clone)]
-pub struct RoundRobinMetrics {}
-
 impl Default for RoundRobin {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl WasimoffTraceEvent for RoundRobinMetrics {
-    fn to_wasimoff(&self) -> Option<crate::protocol::wasimoff::task::TraceEvent> {
-        None
-    }
-}
-
-impl Scheduler<RoundRobinMetrics> for RoundRobin {
+impl Scheduler for RoundRobin {
     fn handle_timeout(&mut self, instant: Instant) {
         self.last_instant = instant;
         let initial_count = self.providers.len();
@@ -208,11 +199,7 @@ impl Scheduler<RoundRobinMetrics> for RoundRobin {
         }
     }
 
-    fn handle_taskresult(
-        &mut self,
-        uuid: Nanoid,
-        task_result: TaskResult<RoundRobinMetrics>,
-    ) -> Option<TaskResult<RoundRobinMetrics>> {
+    fn handle_taskresult(&mut self, uuid: Nanoid, task_result: TaskResult) -> Option<TaskResult> {
         let mut result = None;
 
         // Look up the provider and update its state to idle if it was busy
@@ -235,7 +222,7 @@ impl Scheduler<RoundRobinMetrics> for RoundRobin {
         result
     }
 
-    fn poll_output(&mut self) -> Output<RoundRobinMetrics> {
+    fn poll_output(&mut self) -> Output {
         // Return buffered events first
         if let Some(event) = self.event_buffer.pop_front() {
             return event;
@@ -245,7 +232,7 @@ impl Scheduler<RoundRobinMetrics> for RoundRobin {
         Output::Timeout(self.last_instant + TIMEOUT)
     }
 
-    fn schedule(&mut self, task: Task<RoundRobinMetrics>) {
+    fn schedule(&mut self, task: Task) {
         // Add the task to our pending queue
         self.pending_tasks.push_back(task);
 
@@ -293,7 +280,7 @@ mod test {
                 executable: executable.clone(),
                 args: vec![format!("arg{}", i)],
                 deadline: Some(SystemTime::now() + std::time::Duration::from_secs(60)),
-                metrics: TaskMetrics::<RoundRobinMetrics>::default(),
+                metrics: TaskMetrics::default(),
             };
             println!("Scheduling task {}", i);
             scheduler.schedule(task);
@@ -370,7 +357,7 @@ mod test {
                 stderr: vec![],
                 output_file: None,
             },
-            metrics: TaskMetrics::<RoundRobinMetrics>::default(),
+            metrics: TaskMetrics::default(),
         };
         let returned_result = scheduler.handle_taskresult(providers[0], completed_task_result);
         assert!(returned_result.is_some());
@@ -391,7 +378,7 @@ mod test {
             executable: executable.clone(),
             args: vec!["arg5".to_string()],
             deadline: Some(SystemTime::now() + std::time::Duration::from_secs(60)),
-            metrics: TaskMetrics::<RoundRobinMetrics>::default(),
+            metrics: TaskMetrics::default(),
         };
         scheduler.schedule(task5);
     }

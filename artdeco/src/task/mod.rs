@@ -1,7 +1,4 @@
-use std::{
-    marker::PhantomData,
-    time::{Instant, SystemTime},
-};
+use std::time::SystemTime;
 
 use bytes::Bytes;
 use futures::Sink;
@@ -48,66 +45,49 @@ pub enum TaskId {
 }
 
 #[derive(Debug, Clone)]
-pub struct Task<M> {
+pub struct Task {
     pub executable: TaskExecutable,
     pub args: Vec<String>,
     pub id: TaskId,
     pub deadline: Option<SystemTime>,
-    pub metrics: TaskMetrics<M>,
+    pub metrics: TaskMetrics,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct TaskMetrics<M> {
+pub struct TaskMetrics {
     pub executor_id: Option<Nanoid>,
-    pub trace: Vec<TraceEvent<M>>,
+    pub wasimoff_trace: Vec<wasimoff::task::TraceEvent>,
 }
 
-#[derive(Debug, Clone)]
-pub enum TraceEvent<M> {
-    External(Vec<u8>),
-    Scheduler(M),
-    SchedulerEnter(Instant),
-    SchedulerScheduled(Instant),
-    WasimoffSerialized(Instant),
-    //ConnectionSend(Instant),
-    //ConnectionReceive(Instant),
-    WasimoffDeserialized(Instant),
-    SchedulerResultEnter(Instant),
-    SchedulerLeave(Instant),
-    // other events
-}
+impl TaskMetrics {
+    pub fn push_trace_event_now(
+        &mut self,
+        event: wasimoff::task::trace_event::EventType,
+        msg: Option<String>,
+    ) {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as i64;
 
-pub trait WasimoffTraceEvent {
-    fn to_wasimoff(&self) -> Option<wasimoff::task::TraceEvent>;
-}
+        let trace_event = wasimoff::task::TraceEvent {
+            unixnano: Some(now),
+            event: Some(::protobuf::EnumOrUnknown::new(event)),
+            details: msg,
+            special_fields: ::protobuf::SpecialFields::new(),
+        };
 
-impl WasimoffTraceEvent for () {
-    fn to_wasimoff(&self) -> Option<wasimoff::task::TraceEvent> {
-        None
-    }
-}
-
-impl<M> WasimoffTraceEvent for TraceEvent<M>
-where
-    M: WasimoffTraceEvent,
-{
-    fn to_wasimoff(&self) -> Option<wasimoff::task::TraceEvent> {
-        match self {
-            TraceEvent::External(_items) => None,
-            TraceEvent::Scheduler(scheduler_event) => scheduler_event.to_wasimoff(),
-            _ => None,
-        }
+        self.wasimoff_trace.push(trace_event);
     }
 }
 
 #[derive(Clone)]
-pub struct Workload<S, D, M> {
+pub struct Workload<S, D> {
     pub executable: TaskExecutable,
     pub args: Vec<String>,
     pub deadline: Option<SystemTime>,
     pub response_channel: S,
     pub custom_data: D,
-    pub metrics_type: PhantomData<M>,
 }
 
 pub(crate) struct AssociatedData<S, D> {
@@ -115,15 +95,14 @@ pub(crate) struct AssociatedData<S, D> {
     pub custom_data: D,
 }
 
-impl<M: Default, D, S: Sink<WorkloadResult<D, M>>> Workload<S, D, M> {
-    pub(crate) fn into_task(self, slab: &mut Slab<AssociatedData<S, D>>) -> Task<M> {
+impl<D, S: Sink<WorkloadResult<D>>> Workload<S, D> {
+    pub(crate) fn into_task(self, slab: &mut Slab<AssociatedData<S, D>>) -> Task {
         let Self {
             executable,
             args,
             response_channel,
             deadline,
             custom_data,
-            metrics_type: _,
         } = self;
         let id = slab.insert(AssociatedData {
             response_channel,
@@ -140,10 +119,10 @@ impl<M: Default, D, S: Sink<WorkloadResult<D, M>>> Workload<S, D, M> {
 }
 
 #[derive(Debug, Clone)]
-pub struct TaskResult<M> {
+pub struct TaskResult {
     pub id: TaskId,
     pub status: Status,
-    pub metrics: TaskMetrics<M>,
+    pub metrics: TaskMetrics,
     pub(crate) executable: TaskExecutable,
     pub(crate) args: Vec<String>,
 }
@@ -160,11 +139,11 @@ pub enum Status {
     },
 }
 
-impl<M> TaskResult<M> {
-    pub(crate) fn into_workload_result<D, S: Sink<WorkloadResult<D, M>>>(
+impl TaskResult {
+    pub(crate) fn into_workload_result<D, S: Sink<WorkloadResult<D>>>(
         self,
         slab: &mut Slab<AssociatedData<S, D>>,
-    ) -> (S, WorkloadResult<D, M>) {
+    ) -> (S, WorkloadResult<D>) {
         let Self {
             id,
             status,
@@ -187,7 +166,7 @@ impl<M> TaskResult<M> {
         }
     }
 
-    pub(crate) fn into_task(self) -> Task<M> {
+    pub(crate) fn into_task(self) -> Task {
         let Self {
             id,
             status: _,
@@ -206,9 +185,9 @@ impl<M> TaskResult<M> {
 }
 
 #[derive(Debug)]
-pub struct WorkloadResult<D, M> {
+pub struct WorkloadResult<D> {
     // timestamps, error/success code, std...
     pub status: Status,
-    pub metrics: TaskMetrics<M>,
+    pub metrics: TaskMetrics,
     pub custom_data: D,
 }

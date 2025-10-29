@@ -1,5 +1,5 @@
 use std::{
-    fmt::{Debug, Display},
+    fmt::Display,
     net::{IpAddr, Ipv6Addr, SocketAddr, ToSocketAddrs},
     time::Instant,
 };
@@ -48,16 +48,12 @@ pub fn local_candidates(port: u16) -> Vec<SocketAddr> {
     addr
 }
 
-pub async fn daemon<
-    D,
-    M: Debug + Default,
-    S: Sink<WorkloadResult<D, M>, Error = impl Display> + Unpin,
->(
-    task_queue: impl Stream<Item = Workload<S, D, M>> + Unpin,
+pub async fn daemon<D, S: Sink<WorkloadResult<D>, Error = impl Display> + Unpin>(
+    task_queue: impl Stream<Item = Workload<S, D>> + Unpin,
     provider_stream: impl Stream<Item = String> + Unpin,
     sdp_stream: impl Stream<Item = String> + Unpin,
     mut sdp_sink: impl Sink<String, Error = impl Display> + Unpin,
-    scheduler: impl Scheduler<M>,
+    scheduler: impl Scheduler,
 ) -> anyhow::Result<()> {
     let bind_addr = Ipv6Addr::UNSPECIFIED;
     let udp_socket = UdpSocket::bind(format!("{bind_addr}:0")).await?;

@@ -12,7 +12,7 @@ use crate::{
 pub struct Fixed {
     fixed_uuid: Option<Nanoid>,
     connected: ConnectionStatus,
-    task_list: Vec<Task<()>>,
+    task_list: Vec<Task>,
     last_instant: Instant,
 }
 
@@ -39,7 +39,7 @@ impl Fixed {
     }
 }
 
-impl Scheduler<()> for Fixed {
+impl Scheduler for Fixed {
     fn handle_timeout(&mut self, instant: std::time::Instant) {
         self.last_instant = instant;
     }
@@ -63,7 +63,7 @@ impl Scheduler<()> for Fixed {
         }
     }
 
-    fn poll_output(&mut self) -> super::Output<()> {
+    fn poll_output(&mut self) -> super::Output {
         if let Some(dest) = self.fixed_uuid
             && !self.task_list.is_empty()
         {
@@ -83,15 +83,11 @@ impl Scheduler<()> for Fixed {
         Output::Timeout(self.last_instant + TIMEOUT)
     }
 
-    fn schedule(&mut self, task: Task<()>) {
+    fn schedule(&mut self, task: Task) {
         self.task_list.push(task);
     }
 
-    fn handle_taskresult(
-        &mut self,
-        _uuid: Nanoid,
-        task_result: TaskResult<()>,
-    ) -> Option<TaskResult<()>> {
+    fn handle_taskresult(&mut self, _uuid: Nanoid, task_result: TaskResult) -> Option<TaskResult> {
         debug!("Scheduler task result {:?}", task_result);
         Some(task_result)
     }

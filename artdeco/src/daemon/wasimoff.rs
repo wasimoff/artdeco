@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     error::Error,
     fmt::Display,
-    marker::PhantomData,
     pin::pin,
     time::{Duration, SystemTime},
 };
@@ -26,9 +25,8 @@ use crate::{
         },
     },
     scheduler::Scheduler,
-    task::{Status, TaskExecutable, WasimoffTraceEvent, WorkloadResult},
+    task::{Status, TaskExecutable, WorkloadResult},
 };
-use std::fmt::Debug;
 
 struct CustomData {
     task_id: Option<String>,
@@ -37,17 +35,17 @@ struct CustomData {
     sequence_number: u64,
 }
 
-pub async fn wasimoff_broker<M: WasimoffTraceEvent + Debug + Send + Default + 'static>(
+pub async fn wasimoff_broker(
     datagram_stream: impl Stream<Item = Bytes> + Unpin,
     datagram_sink: impl Sink<Bytes, Error = impl Send + Sync + Error> + Unpin + Clone + 'static,
-    scheduler: impl Scheduler<M> + Send + 'static,
+    scheduler: impl Scheduler + Send + 'static,
     nats_url: impl ToServerAddrs + Send + 'static,
     executables: &HashMap<String, TaskExecutable>,
 ) -> Result<()> {
     info!("Starting wasimoff broker");
 
-    let response_sender = datagram_sink
-        .map(|task_result: WorkloadResult<CustomData, M>| write_to_socket(task_result));
+    let response_sender =
+        datagram_sink.map(|task_result: WorkloadResult<CustomData>| write_to_socket(task_result));
     let task_stream = pin![datagram_stream.filter_map(async |bytes| {
         read_from_socket(bytes, response_sender.clone(), executables)
     })];
@@ -58,18 +56,14 @@ pub async fn wasimoff_broker<M: WasimoffTraceEvent + Debug + Send + Default + 's
     Ok(())
 }
 
-fn read_from_socket<M: WasimoffTraceEvent>(
+fn read_from_socket(
     buffer: Bytes,
-    back_channel: impl Sink<WorkloadResult<CustomData, M>, Error = impl Display>
-    + 'static
-    + Clone
-    + Unpin,
+    back_channel: impl Sink<WorkloadResult<CustomData>, Error = impl Display> + 'static + Clone + Unpin,
     task_executables: &HashMap<String, TaskExecutable>,
 ) -> Option<
     crate::task::Workload<
-        impl Sink<WorkloadResult<CustomData, M>, Error = impl Display> + 'static + Unpin,
+        impl Sink<WorkloadResult<CustomData>, Error = impl Display> + 'static + Unpin,
         CustomData,
-        M,
     >,
 > {
     match Envelope::parse_from_bytes(&buffer) {
@@ -107,7 +101,6 @@ fn read_from_socket<M: WasimoffTraceEvent>(
                             trace,
                             sequence_number: envelope.sequence(),
                         },
-                        metrics_type: PhantomData {},
                     };
 
                     return Some(workload);
@@ -127,7 +120,7 @@ fn read_from_socket<M: WasimoffTraceEvent>(
     None
 }
 
-fn write_to_socket<M: WasimoffTraceEvent>(task_result: WorkloadResult<CustomData, M>) -> Bytes {
+fn write_to_socket(task_result: WorkloadResult<CustomData>) -> Bytes {
     let WorkloadResult {
         status,
         metrics,
@@ -149,9 +142,8 @@ fn write_to_socket<M: WasimoffTraceEvent>(task_result: WorkloadResult<CustomData
     let mut trace = custom_data.trace.take();
     if let Some(trace) = &mut trace {
         metrics
-            .trace
-            .iter()
-            .filter_map(WasimoffTraceEvent::to_wasimoff)
+            .wasimoff_trace
+            .into_iter()
             .for_each(|event: task::TraceEvent| {
                 trace.events.push(event);
             });

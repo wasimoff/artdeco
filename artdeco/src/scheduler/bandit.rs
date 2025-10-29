@@ -1,6 +1,6 @@
-use std::{cmp::Ordering, time::Instant};
-
+#![allow(clippy::all)]
 use nid::Nanoid;
+use std::{cmp::Ordering, time::Instant};
 
 use crate::{
     consumer::ProviderAnnounce,
@@ -46,10 +46,7 @@ impl Bandit {
     }
 }
 
-#[derive(Default, Debug)]
-pub struct BanditMetrics {}
-
-impl Scheduler<BanditMetrics> for Bandit {
+impl Scheduler for Bandit {
     fn handle_timeout(&mut self, instant: Instant) {
         todo!()
     }
@@ -70,16 +67,16 @@ impl Scheduler<BanditMetrics> for Bandit {
     fn handle_taskresult(
         &mut self,
         uuid: nid::Nanoid,
-        task_result: TaskResult<BanditMetrics>,
-    ) -> Option<TaskResult<BanditMetrics>> {
+        task_result: TaskResult,
+    ) -> Option<TaskResult> {
         todo!()
     }
 
-    fn poll_output(&mut self) -> Output<BanditMetrics> {
+    fn poll_output(&mut self) -> Output {
         todo!()
     }
 
-    fn schedule(&mut self, task: Task<BanditMetrics>) {
+    fn schedule(&mut self, task: Task) {
         todo!()
     }
 }

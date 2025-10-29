@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use artdeco::{
     daemon::nats::daemon_nats,
     scheduler::fixed::Fixed,
@@ -35,7 +33,6 @@ async fn main() -> anyhow::Result<()> {
         deadline: None,
         response_channel: response_sender,
         custom_data: (),
-        metrics_type: PhantomData {},
     };
 
     // Send the workload to the queue

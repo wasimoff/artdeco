@@ -18,16 +18,16 @@ pub enum ProviderState {
 }
 
 #[derive(Debug)]
-pub enum Output<M> {
+pub enum Output {
     /// Scheduler timeout, indicates when `poll_output` should be called next
     Timeout(Instant),
     /// Establish a new provider connection
     Connect(Nanoid),
     /// Send task to provider
-    Offload(Nanoid, Task<M>),
+    Offload(Nanoid, Task),
 }
 
-pub trait Scheduler<M> {
+pub trait Scheduler {
     /// Scheduler timeout
     ///
     /// Advances time internally. Afterwards new Events via `poll_output` may be available.
@@ -46,15 +46,11 @@ pub trait Scheduler<M> {
         instant: Instant,
     );
 
-    fn handle_taskresult(
-        &mut self,
-        uuid: Nanoid,
-        task_result: TaskResult<M>,
-    ) -> Option<TaskResult<M>>;
+    fn handle_taskresult(&mut self, uuid: Nanoid, task_result: TaskResult) -> Option<TaskResult>;
 
     /// Poll scheduler for new events
-    fn poll_output(&mut self) -> Output<M>;
+    fn poll_output(&mut self) -> Output;
 
     /// Schedule a task
-    fn schedule(&mut self, task: Task<M>);
+    fn schedule(&mut self, task: Task);
 }

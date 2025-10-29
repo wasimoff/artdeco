@@ -102,6 +102,14 @@ message Task {
       ProviderWorkerExecute = 35; // instance spawned, execute the task
       ProviderWorkerDone = 36; // execution is done, post result to provider
       ProviderTransmitResult = 37; // transmit the result to broker
+
+      ArtDecoSchedulerEnter = 38;
+      ArtDecoSchedulerLeave = 39;
+      ArtDecoSchedulerScheduled = 40;
+      ArtDecoSchedulerResultEnter = 41;
+      ArtDecoSchedulerResultLeave = 42;
+      ArtDecoWasimoffSerialized = 43;
+      ArtDecoWasimoffDeserialized = 44;
     }
   }
 

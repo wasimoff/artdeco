@@ -1,9 +1,13 @@
-use std::{fmt::Display, marker::PhantomData, time::Duration};
+use std::{
+    fmt::Display,
+    time::{Duration, Instant},
+};
 
 use artdeco::{
     daemon::nats::daemon_nats,
+    protocol::wasimoff::task::trace_event::EventType,
     scheduler::fixed::Fixed,
-    task::{TaskExecutable, TraceEvent, Workload, WorkloadResult},
+    task::{TaskExecutable, Workload, WorkloadResult},
 };
 use futures::{StreamExt, channel::mpsc};
 
@@ -45,7 +49,6 @@ async fn main() -> anyhow::Result<()> {
         deadline: None,
         response_channel: response_sender,
         custom_data: (),
-        metrics_type: PhantomData {},
     };
 
     // wait 8 seconds for provider announcements
@@ -84,17 +87,26 @@ impl Display for TaskTime {
     }
 }
 
-fn calc_task_time<A, B>(workload: &WorkloadResult<A, B>) -> TaskTime {
+fn calc_task_time<A>(workload: &WorkloadResult<A>) -> TaskTime {
     // Calculate duration from SchedulerEnter to SchedulerLeave
     let mut scheduled_time = None;
     let mut scheduler_enter_time = None;
     let mut scheduler_leave_time = None;
 
-    for event in &workload.metrics.trace {
-        match event {
-            TraceEvent::SchedulerScheduled(instant) => scheduled_time = Some(*instant),
-            TraceEvent::SchedulerLeave(instant) => scheduler_leave_time = Some(*instant),
-            TraceEvent::SchedulerEnter(instant) => scheduler_enter_time = Some(*instant),
+    for event in &workload.metrics.wasimoff_trace {
+        let unixnano = event.unixnano();
+        let instant = Instant::now()
+            - Duration::from_nanos(
+                (std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos() as i64
+                    - unixnano) as u64,
+            );
+        match event.event() {
+            EventType::ArtDecoSchedulerScheduled => scheduled_time = Some(instant),
+            EventType::ArtDecoSchedulerLeave => scheduler_leave_time = Some(instant),
+            EventType::ArtDecoSchedulerEnter => scheduler_enter_time = Some(instant),
             _ => {}
         }
     }

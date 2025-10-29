@@ -7,10 +7,6 @@ use nid::Nanoid;
 use protobuf::{Message, MessageField, MessageFull, well_known_types::any::Any};
 use tracing::{debug, error, trace};
 
-use crate::{
-    protocol::wasimoff,
-    task::{Task, TaskExecutable},
-};
 use crate::{protocol::wasimoff::Envelope, provider::TaskMetrics};
 use crate::{protocol::wasimoff::envelope::MessageType, task::TaskResult};
 use crate::{
@@ -21,35 +17,39 @@ use crate::{
     protocol::wasimoff::task::{self, QoS},
     task::TaskId,
 };
+use crate::{
+    protocol::wasimoff::{self, task::trace_event::EventType},
+    task::{Task, TaskExecutable},
+};
 
 #[derive(PartialEq, Eq, Hash)]
 pub struct WasimoffConfig {
     pub client_identifier: Nanoid,
 }
 
-pub struct WasimoffProvider<M> {
+pub struct WasimoffProvider {
     config: WasimoffConfig,
-    pending_outputs: VecDeque<Output<M>>,
+    pending_outputs: VecDeque<Output>,
     next_sequence: u64,
-    active_offloads: HashMap<u64, ActiveTask<M>>,
+    active_offloads: HashMap<u64, ActiveTask>,
     remote_files: HashSet<String>,
     last_instant: Instant,
 }
 
-pub enum Output<M> {
+pub enum Output {
     Transmit(Vec<u8>),
-    TaskResult(TaskResult<M>),
+    TaskResult(TaskResult),
     Timeout(Instant),
 }
 
-struct ActiveTask<M> {
-    metrics: TaskMetrics<M>,
+struct ActiveTask {
+    metrics: TaskMetrics,
     id: TaskId,
     args: Vec<String>,
     exec: TaskExecutable,
 }
 
-impl<M> WasimoffProvider<M> {
+impl WasimoffProvider {
     pub fn new(config: WasimoffConfig) -> Self {
         Self {
             config,
@@ -82,12 +82,13 @@ impl<M> WasimoffProvider<M> {
 
         trace!("Received envelope {:?}", envelope);
         let task_response: wasip1::Response = envelope.payload.unpack().unwrap().unwrap();
+        //let response_info = task_response.info.unwrap();
+        //let provider_trace = response_info.trace.unwrap();
         let result = task_response.result.unwrap();
 
         pending_task
             .metrics
-            .trace
-            .push(crate::task::TraceEvent::WasimoffDeserialized(Instant::now()));
+            .push_trace_event_now(EventType::ArtDecoWasimoffDeserialized, None);
         match result {
             wasip1::response::Result::Error(message) => {
                 let status = if message.starts_with("qos") {
@@ -130,7 +131,7 @@ impl<M> WasimoffProvider<M> {
         }
     }
 
-    pub fn poll_output(&mut self) -> Output<M> {
+    pub fn poll_output(&mut self) -> Output {
         if !self.pending_outputs.is_empty() {
             self.pending_outputs.pop_front().unwrap()
         } else {
@@ -147,7 +148,7 @@ impl<M> WasimoffProvider<M> {
         envelope
     }
 
-    pub fn offload(&mut self, task: Task<M>) {
+    pub fn offload(&mut self, task: Task) {
         let Task {
             executable,
             args,
@@ -194,9 +195,7 @@ impl<M> WasimoffProvider<M> {
         let envelope = self.pack(&offload_message);
         let bytes = envelope.write_to_bytes().unwrap();
         self.pending_outputs.push_back(Output::Transmit(bytes));
-        metrics
-            .trace
-            .push(crate::task::TraceEvent::WasimoffSerialized(Instant::now()));
+        metrics.push_trace_event_now(EventType::ArtDecoWasimoffSerialized, None);
         self.active_offloads.insert(
             envelope.sequence(),
             ActiveTask {
@@ -209,15 +208,15 @@ impl<M> WasimoffProvider<M> {
     }
 }
 
-impl<D> PartialEq for WasimoffProvider<D> {
+impl PartialEq for WasimoffProvider {
     fn eq(&self, other: &Self) -> bool {
         self.config == other.config
     }
 }
 
-impl<D> Eq for WasimoffProvider<D> {}
+impl Eq for WasimoffProvider {}
 
-impl<D> std::hash::Hash for WasimoffProvider<D> {
+impl std::hash::Hash for WasimoffProvider {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.config.hash(state);
     }

@@ -1,4 +1,4 @@
-use std::{fmt::Debug, fmt::Display, pin::pin};
+use std::{fmt::Display, pin::pin};
 
 use async_nats::{PublishMessage, Subject, ToServerAddrs};
 use futures::{Sink, SinkExt, Stream, StreamExt};
@@ -6,13 +6,9 @@ use tracing::{debug, info};
 
 use crate::{daemon::generic::daemon, scheduler::Scheduler, task::Workload, task::WorkloadResult};
 
-pub async fn daemon_nats<
-    D,
-    M: Debug + Default,
-    S: Sink<WorkloadResult<D, M>, Error = impl Display> + Unpin,
->(
-    task_queue: impl Stream<Item = Workload<S, D, M>> + Unpin,
-    scheduler: impl Scheduler<M>,
+pub async fn daemon_nats<D, S: Sink<WorkloadResult<D>, Error = impl Display> + Unpin>(
+    task_queue: impl Stream<Item = Workload<S, D>> + Unpin,
+    scheduler: impl Scheduler,
     nats_url: impl ToServerAddrs,
 ) -> anyhow::Result<()> {
     info!("Starting NATS daemon");

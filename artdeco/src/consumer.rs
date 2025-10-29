@@ -18,6 +18,7 @@ use crate::{
         self, InputInner, RtcConnectionManager,
         rtc_connection::{RTCConnectionConfig, SdpMessage},
     },
+    protocol::wasimoff::task::trace_event::EventType,
     provider::{self, ProviderManager},
     scheduler::{self, ProviderState, Scheduler},
     task::{Task, TaskResult},
@@ -124,11 +125,11 @@ pub struct UdpTransmit {
     pub contents: Vec<u8>,
 }
 
-pub enum Output<M> {
+pub enum Output {
     Timeout(Instant),
     SocketTransmit(UdpTransmit),
     SdpTransmit(String),
-    TaskResult(TaskResult<M>),
+    TaskResult(TaskResult),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -143,15 +144,15 @@ pub struct ProviderAnnounce {
     pub last: Instant,
 }
 
-pub struct Consumer<S, M> {
+pub struct Consumer<S> {
     connection_manager: RtcConnectionManager,
-    provider_manager: ProviderManager<M>,
+    provider_manager: ProviderManager,
     scheduler: S,
     last_instant: Instant,
     ready: bool,
 }
 
-impl<M, S: Scheduler<M>> Consumer<S, M> {
+impl<S: Scheduler> Consumer<S> {
     pub fn new(rtc_config: RTCConnectionConfig, scheduler: S, stun_server: SocketAddr) -> Self {
         Self {
             connection_manager: RtcConnectionManager::new(rtc_config, stun_server),
@@ -201,16 +202,15 @@ impl<M, S: Scheduler<M>> Consumer<S, M> {
         self.ready = true;
     }
 
-    pub fn handle_task(&mut self, mut task: Task<M>) {
+    pub fn handle_task(&mut self, mut task: Task) {
         debug!("scheduling task");
         task.metrics
-            .trace
-            .push(crate::task::TraceEvent::SchedulerEnter(Instant::now()));
+            .push_trace_event_now(EventType::ArtDecoSchedulerEnter, None);
         self.scheduler.schedule(task);
         self.ready = true;
     }
 
-    pub fn poll_output(&mut self) -> Output<M> {
+    pub fn poll_output(&mut self) -> Output {
         let mut next_timeout = self.last_instant + TIMEOUT;
         assert!(self.ready);
 
@@ -230,8 +230,7 @@ impl<M, S: Scheduler<M>> Consumer<S, M> {
             scheduler::Output::Offload(uuid, mut task) => {
                 info!("offloading task to {}", uuid);
                 task.metrics
-                    .trace
-                    .push(crate::task::TraceEvent::SchedulerScheduled(Instant::now()));
+                    .push_trace_event_now(EventType::ArtDecoSchedulerScheduled, None);
                 self.provider_manager.offload(task, uuid);
             }
         }
@@ -240,13 +239,11 @@ impl<M, S: Scheduler<M>> Consumer<S, M> {
             provider::Output::TaskResult(uuid, mut task_result) => {
                 task_result
                     .metrics
-                    .trace
-                    .push(crate::task::TraceEvent::SchedulerResultEnter(Instant::now()));
+                    .push_trace_event_now(EventType::ArtDecoSchedulerResultEnter, None);
                 if let Some(mut result) = self.scheduler.handle_taskresult(uuid, task_result) {
                     result
                         .metrics
-                        .trace
-                        .push(crate::task::TraceEvent::SchedulerLeave(Instant::now()));
+                        .push_trace_event_now(EventType::ArtDecoSchedulerResultLeave, None);
                     return Output::TaskResult(result);
                 }
             }
