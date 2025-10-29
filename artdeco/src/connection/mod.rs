@@ -363,7 +363,14 @@ fn from_std(
 
 #[cfg(test)]
 mod test {
+    use nid::Nanoid;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::time::Duration;
+    use str0m::Candidate;
+    use str0m::net::Protocol;
+
+    use super::*;
+    use crate::connection::rtc_connection::{RTCConnectionConfig, Sdp, SdpMessage};
 
     #[test]
     fn test_from_to_std() {
@@ -392,5 +399,115 @@ mod test {
         let zero_sans_io = from_std(base, zero_target);
         let zero_back = to_std(zero_sans_io, base);
         assert_eq!(zero_back, zero_target);
+    }
+
+    #[test]
+    fn test_handle_sdp_with_wrong_destination() {
+        // Create a test RTC connection manager
+        let local_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8001);
+        let stun_server = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 3478);
+
+        let local_uuid = Nanoid::new();
+        let config = RTCConnectionConfig {
+            local_host_addr: vec![local_addr],
+            data_channel_name: "test_channel".to_string(),
+            local_uuid,
+            start: Instant::now(),
+        };
+
+        let mut manager = RtcConnectionManager::new(config, stun_server);
+
+        // Create some test UUIDs
+        let existing_connection_uuid = Nanoid::new();
+        let non_existing_uuid = Nanoid::new();
+        let sender_uuid = Nanoid::new();
+
+        // Add a connection to the manager
+        manager.rtc_connections.insert(
+            existing_connection_uuid,
+            RTCConnection::new(manager.default_rtc_config.clone(), sender_uuid),
+        );
+
+        // Test 1: SDP message for non-existing connection (wrong destination)
+        // This should not crash and should return early
+        let candidate = Candidate::host(local_addr, Protocol::Udp).unwrap();
+        let wrong_destination_message = SdpMessage {
+            source: sender_uuid,
+            destination: non_existing_uuid, // This connection doesn't exist
+            msg: Sdp::Candidate(candidate.clone()),
+        };
+
+        // This should not crash - the method should return early when connection is not found
+        manager.handle_sdp(wrong_destination_message);
+
+        // Test 2: SDP message with correct destination but from unknown sender
+        // Create a message that would be sent to existing connection but from unknown sender
+        let unknown_sender = Nanoid::new();
+        let message_from_unknown_sender = SdpMessage {
+            source: unknown_sender,
+            destination: existing_connection_uuid,
+            msg: Sdp::Candidate(candidate.clone()),
+        };
+
+        // This should also not crash - the connection.accepts() should return false
+        manager.handle_sdp(message_from_unknown_sender);
+
+        // Test 3: Valid SDP message (for comparison)
+        // This should be accepted by the connection
+        let valid_message = SdpMessage {
+            source: sender_uuid,
+            destination: existing_connection_uuid,
+            msg: Sdp::Candidate(candidate),
+        };
+
+        // This should not crash and should be processed
+        manager.handle_sdp(valid_message);
+
+        // If we reach here without panicking, the test passes
+        // The key point is that handle_sdp should be robust against:
+        // 1. Messages for non-existing connections
+        // 2. Messages that connections don't accept
+        assert!(
+            true,
+            "handle_sdp completed without crashing for wrong destinations"
+        );
+    }
+
+    #[test]
+    fn test_handle_sdp_multiple_wrong_destinations() {
+        // Test with multiple wrong destinations to ensure robustness
+        let local_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8002);
+        let stun_server = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 3478);
+
+        let local_uuid = Nanoid::new();
+        let config = RTCConnectionConfig {
+            local_host_addr: vec![local_addr],
+            data_channel_name: "test_channel".to_string(),
+            local_uuid,
+            start: Instant::now(),
+        };
+
+        let mut manager = RtcConnectionManager::new(config, stun_server);
+
+        // Send multiple SDP messages with wrong destinations
+        for _ in 0..10 {
+            let random_source = Nanoid::new();
+            let random_destination = Nanoid::new();
+            let candidate = Candidate::host(local_addr, Protocol::Udp).unwrap();
+
+            let wrong_message = SdpMessage {
+                source: random_source,
+                destination: random_destination,
+                msg: Sdp::Candidate(candidate),
+            };
+
+            // None of these should crash
+            manager.handle_sdp(wrong_message);
+        }
+
+        assert!(
+            true,
+            "handle_sdp handled multiple wrong destinations without crashing"
+        );
     }
 }
