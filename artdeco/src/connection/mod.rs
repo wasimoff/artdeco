@@ -172,10 +172,17 @@ impl RtcConnectionManager {
     }
 
     pub fn handle_sdp(&mut self, sdp_message: SdpMessage) {
-        if let Some(connection) = self.rtc_connections.get_mut(&sdp_message.source) {
-            self.ready = true;
-            connection.handle_input(rtc_connection::Receive::Sdp(sdp_message));
+        let Some(connection) = self.rtc_connections.get_mut(&sdp_message.source) else {
+            return;
+        };
+
+        let receive = rtc_connection::Receive::Sdp(sdp_message);
+        if !connection.accepts(&receive) {
+            return;
         }
+
+        self.ready = true;
+        connection.handle_input(receive);
     }
 
     pub fn handle_input(&mut self, input: Input) {
