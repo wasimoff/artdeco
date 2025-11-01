@@ -263,7 +263,14 @@ mod test {
         // Announce and connect all providers
         for &provider_id in &providers {
             let announce = ProviderAnnounce {
-                announce: ProviderAnnounceMsg { id: provider_id },
+                announce: ProviderAnnounceMsg {
+                    id: provider_id,
+                    concurrency: 1,
+                    tasks: 0,
+                    timestamp: 0,
+                    active_connections: 0,
+                    max_connections: 0,
+                },
                 last: Instant::now(),
             };
             scheduler.handle_announce(announce);

@@ -135,7 +135,13 @@ pub enum Output {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct ProviderAnnounceMsg {
     pub id: Nanoid,
-    // capabilities
+    pub concurrency: u32,
+    pub tasks: u32,
+    pub timestamp: u64,
+    #[serde(rename = "activeConnections")]
+    pub active_connections: u32,
+    #[serde(rename = "maxConnections")]
+    pub max_connections: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
