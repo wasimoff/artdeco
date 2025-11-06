@@ -110,6 +110,9 @@ message Task {
       ArtDecoSchedulerResultLeave = 42;
       ArtDecoWasimoffSerialized = 43;
       ArtDecoWasimoffDeserialized = 44;
+      ArtDecoSchedulerProviderConnect = 45;
+      ArtDecoSchedulerProviderOffload = 46;
+      ArtDecoSchedulerRequeue = 47;
     }
   }
 

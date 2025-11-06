@@ -1,5 +1,6 @@
 use crate::{
     consumer::{ProviderAnnounce, TIMEOUT},
+    protocol::wasimoff::task::trace_event::EventType,
     scheduler::{Output, ProviderState, Scheduler},
     task::{Task, TaskResult},
 };
@@ -98,7 +99,7 @@ impl RoundRobin {
 
     /// Process pending tasks and generate events
     fn process_pending_tasks(&mut self) {
-        let Some(next_task) = self.pending_tasks.pop_front() else {
+        let Some(mut next_task) = self.pending_tasks.pop_front() else {
             return;
         };
         let Some(next_provider) = self.next_provider() else {
@@ -113,11 +114,17 @@ impl RoundRobin {
 
         match provider.state {
             ProviderStatus::Disconnected => {
+                next_task
+                    .metrics
+                    .push_trace_event_now(EventType::ArtDecoSchedulerProviderConnect, None);
                 provider.state = ProviderStatus::WaitingForConnection(next_task);
                 let connect_event = Output::Connect(next_provider);
                 self.event_buffer.push_back(connect_event);
             }
             ProviderStatus::Idle => {
+                next_task
+                    .metrics
+                    .push_trace_event_now(EventType::ArtDecoSchedulerProviderOffload, None);
                 provider.state = ProviderStatus::Busy;
                 let schedule_event = Output::Offload(next_provider, next_task);
                 self.event_buffer.push_back(schedule_event);
@@ -184,12 +191,16 @@ impl Scheduler for RoundRobin {
             (ProviderState::Connected, ProviderStatus::Disconnected) => {
                 provider_info.state = ProviderStatus::Idle;
             }
-            (ProviderState::Connected, ProviderStatus::WaitingForConnection(task)) => {
+            (ProviderState::Connected, ProviderStatus::WaitingForConnection(mut task)) => {
+                task.metrics
+                    .push_trace_event_now(EventType::ArtDecoSchedulerProviderOffload, None);
                 let schedule_event = Output::Offload(uuid, task);
                 self.event_buffer.push_back(schedule_event);
                 provider_info.state = ProviderStatus::Busy;
             }
-            (ProviderState::Disconnected, ProviderStatus::WaitingForConnection(task)) => {
+            (ProviderState::Disconnected, ProviderStatus::WaitingForConnection(mut task)) => {
+                task.metrics
+                    .push_trace_event_now(EventType::ArtDecoSchedulerRequeue, None);
                 self.pending_tasks.push_back(task);
                 provider_info.state = ProviderStatus::Disconnected;
             }
@@ -211,7 +222,10 @@ impl Scheduler for RoundRobin {
 
         // Check if the task result indicates a QoS error and reschedule if needed
         if matches!(task_result.status, crate::task::Status::QoSError(_)) {
-            self.pending_tasks.push_back(task_result.into_task());
+            let mut task = task_result.into_task();
+            task.metrics
+                .push_trace_event_now(EventType::ArtDecoSchedulerRequeue, None);
+            self.pending_tasks.push_back(task);
         } else {
             result = Some(task_result);
         }

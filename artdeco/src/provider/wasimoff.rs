@@ -92,7 +92,7 @@ impl WasimoffProvider {
                 .wasimoff_trace
                 .append(&mut provider_trace.events);
         }
-        pending_task.metrics.executor_id = response_info.provider;
+        pending_task.metrics.executor_id = Some(self.config.client_identifier.into());
 
         let result = task_response.result.unwrap();
 
