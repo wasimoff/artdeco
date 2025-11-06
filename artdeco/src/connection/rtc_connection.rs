@@ -88,6 +88,10 @@ pub struct RTCConnectionConfig {
 }
 
 impl RTCConnection {
+    pub fn is_ready(&self) -> bool {
+        self.ready
+    }
+
     pub fn new(config: RTCConnectionConfig, remote_uuid: Nanoid) -> Self {
         let buffered_outputs = VecDeque::new();
         let mut rtc = Rtc::builder().build();

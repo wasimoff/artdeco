@@ -275,6 +275,9 @@ impl RtcConnectionManager {
 
         // poll all rtc connections
         for (key, connection) in &mut self.rtc_connections {
+            if !connection.is_ready() {
+                continue;
+            }
             match connection.poll_output() {
                 rtc_connection::Output::RtcTransmit(transmit) => {
                     self.output_buffer
@@ -334,6 +337,7 @@ impl RtcConnectionManager {
         if self.output_buffer.is_empty() {
             self.ready = false;
         }
+
         self.output_buffer
             .pop_front()
             .unwrap_or(Output::Timeout(smallest_timeout))
