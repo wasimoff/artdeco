@@ -97,6 +97,14 @@ impl RoundRobin {
         None
     }
 
+    /// Sort providers alphabetically by their Nanoid
+    fn sort_providers(&mut self) {
+        self.providers.sort_by_key(|id, _| *id);
+
+        // Reset the next_provider_index since the order has changed
+        self.next_provider_index = 0;
+    }
+
     /// Process pending tasks and generate events
     fn process_pending_tasks(&mut self) {
         let Some(mut next_task) = self.pending_tasks.pop_front() else {
@@ -156,14 +164,22 @@ impl Scheduler for RoundRobin {
     }
 
     fn handle_announce(&mut self, announce: ProviderAnnounce) {
+        let provider_id = announce.announce.id;
+        let was_new_provider = !self.providers.contains_key(&provider_id);
+
         let provider_info = self
             .providers
-            .entry(announce.announce.id)
+            .entry(provider_id)
             .or_insert_with(|| ProviderInfo {
                 state: ProviderStatus::Disconnected,
                 last_announce: announce.last,
             });
         provider_info.last_announce = announce.last;
+
+        // If this was a new provider, sort the providers alphabetically
+        if was_new_provider {
+            self.sort_providers();
+        }
 
         // Process any pending tasks since we have a new provider
         self.process_pending_tasks();
@@ -354,19 +370,22 @@ mod test {
         println!("all offload events collected: {}", offload_events.len());
 
         // Verify round-robin distribution - should only have 3 offloads (all providers busy)
-        // Providers are distributed in announcement order, not sorted order
+        // Providers are now sorted alphabetically, not in announcement order
+        let mut sorted_providers = providers.clone();
+        sorted_providers.sort();
         println!("Providers in announcement order: {:?}", providers);
+        println!("Providers in sorted order: {:?}", sorted_providers);
         println!("Offload events: {:?}", offload_events);
 
         assert_eq!(offload_events.len(), 3);
-        assert_eq!(offload_events[0], providers[0]); // Task 1 -> Provider 1 (first announced)
-        assert_eq!(offload_events[1], providers[1]); // Task 2 -> Provider 2 (second announced)
-        assert_eq!(offload_events[2], providers[2]); // Task 3 -> Provider 3 (third announced)
+        assert_eq!(offload_events[0], sorted_providers[0]); // Task 1 -> First provider alphabetically
+        assert_eq!(offload_events[1], sorted_providers[1]); // Task 2 -> Second provider alphabetically  
+        assert_eq!(offload_events[2], sorted_providers[2]); // Task 3 -> Third provider alphabetically
 
         // Now all providers are busy, next poll should return timeout
         assert!(matches!(scheduler.poll_output(), Output::Timeout(_)));
 
-        // Complete task on provider 0 to free it up
+        // Complete task on the first provider alphabetically to free it up
         use crate::task::{Status, TaskResult};
         let completed_task_result = TaskResult {
             id: TaskId::Consumer(1),
@@ -380,13 +399,14 @@ mod test {
             },
             metrics: TaskMetrics::default(),
         };
-        let returned_result = scheduler.handle_taskresult(providers[0], completed_task_result);
+        let returned_result =
+            scheduler.handle_taskresult(sorted_providers[0], completed_task_result);
         assert!(returned_result.is_some());
 
         // Now we should get the 4th offload event for the pending task
         match scheduler.poll_output() {
             Output::Offload(provider_id, _) => {
-                assert_eq!(provider_id, providers[0]); // Task 4 -> Provider 1 (now available)
+                assert_eq!(provider_id, sorted_providers[0]); // Task 4 -> First provider alphabetically (now available)
             }
             other => panic!("Expected Offload event, got {:?}", other),
         }
