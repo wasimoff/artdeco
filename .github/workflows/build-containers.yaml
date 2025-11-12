@@ -58,6 +58,8 @@ jobs:
           context: .
           target: ${{ matrix.target }}
           push: ${{ github.event_name != 'pull_request' && steps.meta.outputs.head == 'main' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: >-
             ${{ github.event_name == 'schedule' && format('ghcr.io/wasimoff/{0}:nightly',
             matrix.target) || format('{0}:latest,{0}:{1}', format('ghcr.io/wasimoff/{0}',
