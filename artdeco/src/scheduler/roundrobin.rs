@@ -376,7 +376,7 @@ mod test {
 
         // Verify round-robin distribution - should only have 3 offloads (all providers busy)
         // Providers are now sorted alphabetically, not in announcement order
-        let mut sorted_providers = providers.clone();
+        let mut sorted_providers = providers;
         sorted_providers.sort();
         println!("Providers in announcement order: {:?}", providers);
         println!("Providers in sorted order: {:?}", sorted_providers);

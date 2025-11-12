@@ -471,10 +471,6 @@ mod test {
         // The key point is that handle_sdp should be robust against:
         // 1. Messages for non-existing connections
         // 2. Messages that connections don't accept
-        assert!(
-            true,
-            "handle_sdp completed without crashing for wrong destinations"
-        );
     }
 
     #[test]
@@ -508,10 +504,5 @@ mod test {
             // None of these should crash
             manager.handle_sdp(wrong_message);
         }
-
-        assert!(
-            true,
-            "handle_sdp handled multiple wrong destinations without crashing"
-        );
     }
 }
