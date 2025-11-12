@@ -3,7 +3,7 @@ use std::{collections::HashMap, fs, path::Path};
 use anyhow::Result;
 use artdeco::{
     daemon::wasimoff::wasimoff_broker,
-    scheduler::{fixed::Fixed, roundrobin::RoundRobin},
+    scheduler::{drift::Drift, fixed::Fixed, roundrobin::RoundRobin},
     task::TaskExecutable,
 };
 use bytes::Bytes;
@@ -47,6 +47,8 @@ enum Scheduler {
     Fixed,
     /// RoundRobin Scheduler
     RoundRobin,
+    /// Uniform Scheduler
+    Uniform,
 }
 
 #[tokio::main]
@@ -81,6 +83,15 @@ async fn main() -> Result<()> {
                 task_receiver,
                 result_sender,
                 RoundRobin::new(),
+                args.broker_url,
+                &binaries,
+            )
+            .await
+            .unwrap(),
+            Scheduler::Uniform => wasimoff_broker(
+                task_receiver,
+                result_sender,
+                Drift::default(),
                 args.broker_url,
                 &binaries,
             )

@@ -26,7 +26,7 @@ sha2 = "0.10"
 slab = "0.4"
 stun-proto = { version = "1.0.0", features = ["std"] }
 sans-io-time = { version = "0.1" }
-fastrand = "2.3.0"
+rand = "0.9"
 lazy_static = "1.5.0"
 bytesize = "2.1.0"
 pin-project-lite = "0.2.16"

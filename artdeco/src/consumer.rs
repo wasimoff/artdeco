@@ -239,6 +239,12 @@ impl<S: Scheduler> Consumer<S> {
                     .push_trace_event_now(EventType::ArtDecoSchedulerScheduled, None);
                 self.provider_manager.offload(task, uuid);
             }
+            scheduler::Output::Disconnect(nanoid) => {
+                self.connection_manager.handle_input(connection::Input {
+                    inner: InputInner::Disconnect(nanoid),
+                    instant: self.last_instant,
+                })
+            }
         }
 
         match self.provider_manager.poll_output() {
@@ -252,6 +258,7 @@ impl<S: Scheduler> Consumer<S> {
                         .push_trace_event_now(EventType::ArtDecoSchedulerResultLeave, None);
                     return Output::TaskResult(result);
                 }
+                next_timeout = self.last_instant;
             }
             provider::Output::ProviderTransmit(uuid, items) => {
                 debug!("sending provider transmit to connection {}", uuid);

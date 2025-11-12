@@ -7,7 +7,7 @@ use crate::{
     task::{Task, TaskResult},
 };
 
-pub mod bandit;
+pub mod drift;
 pub mod fixed;
 pub mod roundrobin;
 
@@ -23,6 +23,8 @@ pub enum Output {
     Timeout(Instant),
     /// Establish a new provider connection
     Connect(Nanoid),
+    /// Disconnect from a provider
+    Disconnect(Nanoid),
     /// Send task to provider
     Offload(Nanoid, Task),
 }

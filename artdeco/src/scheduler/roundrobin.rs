@@ -32,7 +32,6 @@ use std::{collections::VecDeque, time::Duration};
 struct ProviderInfo {
     state: ProviderStatus,
     last_announce: Instant,
-    // TODO multiple workers
 }
 
 #[derive(Clone)]
@@ -341,6 +340,7 @@ mod test {
                     Output::Offload(id, _) => format!("Offload({})", id),
                     Output::Connect(id) => format!("Connect({})", id),
                     Output::Timeout(_) => "Timeout".to_string(),
+                    Output::Disconnect(id) => format!("Disconnect({})", id),
                 }
             );
 
@@ -360,6 +360,11 @@ mod test {
                 }
                 Output::Connect(id) => {
                     all_events.push(format!("Connect({})", id));
+                    // Other event types, continue polling
+                    continue;
+                }
+                Output::Disconnect(id) => {
+                    all_events.push(format!("Disconnect({})", id));
                     // Other event types, continue polling
                     continue;
                 }
