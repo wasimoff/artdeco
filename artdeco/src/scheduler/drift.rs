@@ -219,12 +219,8 @@ impl Scheduler for Drift {
         self.providers
             .iter_mut()
             .filter(|(_, provider_info)| provider_info.busy())
-            .for_each(|(provider_id, provider_info)| {
+            .for_each(|(_, provider_info)| {
                 provider_info.total_busy_duration += duration_since_last;
-                info!(
-                    "Update Provider {} busy duration: {:?}",
-                    provider_id, provider_info.total_busy_duration
-                );
             });
 
         self.process_pending_tasks();
