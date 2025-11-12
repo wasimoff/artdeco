@@ -11,7 +11,7 @@ use std::{
     collections::VecDeque,
     time::{Duration, Instant},
 };
-use tracing::info;
+use tracing::{debug, info};
 
 #[derive(Clone)]
 enum ProviderStatus {
@@ -219,7 +219,7 @@ impl Scheduler for Drift {
                 unreachable!("provider is already idle but now somehow freshly connected")
             }
             (ProviderState::Disconnected, ProviderStatus::Disconnected) => {
-                unreachable!("provider is already disconnected")
+                debug!("provider is already disconnected")
             }
             (ProviderState::Connected, ProviderStatus::Disconnected) => {
                 provider_info.state = ProviderStatus::Connected;
