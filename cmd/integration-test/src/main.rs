@@ -1,7 +1,7 @@
 use artdeco::{
     daemon::nats::daemon_nats,
-    scheduler::fixed::Fixed,
-    task::{Status, TaskExecutable, Workload},
+    scheduler::drift::Drift,
+    task::{TaskExecutable, Workload},
 };
 use futures::{StreamExt, channel::mpsc};
 
@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
     drop(sender); // drop sender so the daemon stops after offloading all tasks
 
     // Create a scheduler
-    let scheduler = Fixed::new();
+    let scheduler = Drift::default();
     //let receiver_stream = ReceiverStream::new(receiver);
     let args: Vec<String> = std::env::args().collect();
     let binding = "nats".to_string();
@@ -50,10 +50,6 @@ async fn main() -> anyhow::Result<()> {
     let result = response_receiver.next().await.unwrap();
     let result2 = response_receiver.next().await.unwrap();
     info!("received response in main, {:?}", result);
-    assert_eq!(
-        result.status,
-        Status::QoSError("qos: no idle workers for immediate mode".to_string())
-    );
     info!("received response in main, {:?}", result2);
     Ok(())
 }

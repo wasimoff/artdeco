@@ -11,18 +11,28 @@ use std::{
     collections::VecDeque,
     time::{Duration, Instant},
 };
-use tracing::{debug, info};
+use tracing::{info, trace};
 
 #[derive(Clone)]
 enum ProviderStatus {
     Disconnected,
-    WaitingForConnection(Task),
+    WaitingForConnection(Vec<Task>),
     Connected,
 }
 
+#[derive(Clone)]
 enum ScheduleResult {
     Success,
     Failure,
+}
+
+impl std::fmt::Display for ScheduleResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScheduleResult::Success => write!(f, "Success"),
+            ScheduleResult::Failure => write!(f, "Failure"),
+        }
+    }
 }
 
 pub struct Drift {
@@ -66,6 +76,11 @@ impl ProviderInfo {
     fn busy(&self) -> bool {
         self.active_tasks.len() >= self.max_tasks.try_into().unwrap()
     }
+
+    fn idle(&self) -> bool {
+        self.active_tasks.is_empty()
+            && !matches!(self.state, ProviderStatus::WaitingForConnection(_))
+    }
 }
 
 impl Drift {
@@ -91,7 +106,7 @@ impl Drift {
     fn process_pending_tasks(&mut self) {
         // cleanup connections
         for (nanoid, provider_info) in &mut self.providers {
-            if matches!(provider_info.state, ProviderStatus::Connected) && !provider_info.busy() {
+            if matches!(provider_info.state, ProviderStatus::Connected) && provider_info.idle() {
                 self.event_buffer.push_back(Output::Disconnect(*nanoid));
                 provider_info.state = ProviderStatus::Disconnected;
             }
@@ -108,10 +123,22 @@ impl Drift {
         let (id, p_info) = Self::get_next_provider(&mut self.providers, self.window_size);
 
         // schedule task
-        let task = self.pending_tasks.pop_front().unwrap();
-        if matches!(p_info.state, ProviderStatus::Disconnected) {
-            self.event_buffer.push_back(Output::Connect(*id));
-            p_info.state = ProviderStatus::WaitingForConnection(task);
+        let mut task = self.pending_tasks.pop_front().unwrap();
+        // provider is already connected, task
+        match &mut p_info.state {
+            ProviderStatus::Disconnected => {
+                task.metrics
+                    .push_trace_event_now(EventType::ArtDecoSchedulerProviderConnect, None);
+                self.event_buffer.push_back(Output::Connect(*id));
+                p_info.state = ProviderStatus::WaitingForConnection(vec![task]);
+            }
+            ProviderStatus::Connected => {
+                Self::offload_task(*id, self.last_instant, task, p_info, &mut self.event_buffer);
+            }
+            ProviderStatus::WaitingForConnection(waiting_tasks) => {
+                // Add the new task to the list of waiting tasks
+                waiting_tasks.push(task);
+            }
         }
     }
 
@@ -134,6 +161,7 @@ impl Drift {
     fn adjust_window_size(&mut self) {
         // if no history is stored, then the window size cannot be adjusted
         // set it to the current amount of providers and schedule uniformly
+        let old_window = self.window_size;
         if self.max_history == 0 {
             self.window_size = self.providers.len();
         } else if self.max_history > 0 {
@@ -148,10 +176,27 @@ impl Drift {
                 self.window_size = self.window_size.saturating_sub(1)
             }
         }
-        info!("Adjusted window size to: {}", self.window_size);
+        if old_window != self.window_size {
+            info!("Adjusted window size to: {}", self.window_size);
+        }
+    }
+
+    fn offload_task(
+        uuid: Nanoid,
+        last_instant: Instant,
+        mut task: Task,
+        provider_info: &mut ProviderInfo,
+        event_buffer: &mut VecDeque<Output>,
+    ) {
+        task.metrics
+            .push_trace_event_now(EventType::ArtDecoSchedulerProviderOffload, None);
+        provider_info.active_tasks.push((last_instant, task.id));
+        let schedule_event = Output::Offload(uuid, task);
+        event_buffer.push_back(schedule_event);
     }
 
     fn add_history(&mut self, schedule_result: ScheduleResult) {
+        info!("Add result {} to scheduling history", schedule_result);
         self.history.push_back(schedule_result);
         if self.history.len() > self.max_history && self.max_history != 0 {
             self.history.pop_front();
@@ -172,10 +217,14 @@ impl Scheduler for Drift {
 
         // Update busy duration for providers with busy workers
         self.providers
-            .values_mut()
-            .filter(|provider_info| provider_info.busy())
-            .for_each(|provider_info| {
+            .iter_mut()
+            .filter(|(_, provider_info)| provider_info.busy())
+            .for_each(|(provider_id, provider_info)| {
                 provider_info.total_busy_duration += duration_since_last;
+                info!(
+                    "Update Provider {} busy duration: {:?}",
+                    provider_id, provider_info.total_busy_duration
+                );
             });
 
         self.process_pending_tasks();
@@ -219,25 +268,31 @@ impl Scheduler for Drift {
                 unreachable!("provider is already idle but now somehow freshly connected")
             }
             (ProviderState::Disconnected, ProviderStatus::Disconnected) => {
-                debug!("provider is already disconnected")
+                trace!("provider is already disconnected")
             }
             (ProviderState::Connected, ProviderStatus::Disconnected) => {
                 provider_info.state = ProviderStatus::Connected;
             }
-            (ProviderState::Connected, ProviderStatus::WaitingForConnection(mut task)) => {
-                task.metrics
-                    .push_trace_event_now(EventType::ArtDecoSchedulerProviderOffload, None);
+            (ProviderState::Connected, ProviderStatus::WaitingForConnection(waiting_tasks)) => {
                 provider_info.state = ProviderStatus::Connected;
-                provider_info
-                    .active_tasks
-                    .push((self.last_instant, task.id));
-                let schedule_event = Output::Offload(uuid, task);
-                self.event_buffer.push_back(schedule_event);
+                // Offload all waiting tasks
+                for task in waiting_tasks {
+                    Self::offload_task(
+                        uuid,
+                        self.last_instant,
+                        task,
+                        provider_info,
+                        &mut self.event_buffer,
+                    );
+                }
             }
-            (ProviderState::Disconnected, ProviderStatus::WaitingForConnection(mut task)) => {
-                task.metrics
-                    .push_trace_event_now(EventType::ArtDecoSchedulerRequeue, None);
-                self.pending_tasks.push_back(task);
+            (ProviderState::Disconnected, ProviderStatus::WaitingForConnection(waiting_tasks)) => {
+                // Requeue all waiting tasks
+                for mut task in waiting_tasks {
+                    task.metrics
+                        .push_trace_event_now(EventType::ArtDecoSchedulerRequeue, None);
+                    self.pending_tasks.push_back(task);
+                }
                 provider_info.state = ProviderStatus::Disconnected;
                 provider_info.active_tasks.clear();
             }
@@ -253,12 +308,13 @@ impl Scheduler for Drift {
             unreachable!("cant find provider")
         };
 
-        let start_time = provider_info
-            .active_tasks
-            .iter_mut()
-            .find(|(_, task_id)| *task_id == task_result.id)
-            .map(|(start_time, _)| *start_time)
-            .expect("worker not found");
+        let (start_time, _) = provider_info.active_tasks.remove(
+            provider_info
+                .active_tasks
+                .iter()
+                .position(|(_, task_id)| *task_id == task_result.id)
+                .expect("worker not found"),
+        );
 
         let task_duration = self.last_instant.saturating_duration_since(start_time);
         provider_info.total_busy_duration += task_duration;
@@ -266,7 +322,6 @@ impl Scheduler for Drift {
         let result = match task_result.status {
             Status::QoSError(_) => {
                 self.add_history(ScheduleResult::Failure);
-
                 let mut task = task_result.into_task();
                 task.metrics
                     .push_trace_event_now(EventType::ArtDecoSchedulerRequeue, None);
