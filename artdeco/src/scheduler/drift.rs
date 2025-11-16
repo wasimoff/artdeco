@@ -7,20 +7,17 @@ use crate::{
 use indexmap::IndexMap;
 use nid::Nanoid;
 use rand::Rng;
-use std::{
-    collections::VecDeque,
-    time::{Duration, Instant},
-};
+use std::{collections::VecDeque, time::Instant};
 use tracing::{info, trace};
 
 #[derive(Clone)]
 enum ProviderStatus {
     Disconnected,
     WaitingForConnection(Vec<Task>),
-    Connected,
+    Connected(Vec<TaskId>),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 enum ScheduleResult {
     Success,
     Failure,
@@ -45,41 +42,61 @@ pub struct Drift {
     window_size: usize,
     history: VecDeque<ScheduleResult>,
     max_history: usize,
+    max_idle_pool: usize,
 }
 
 // drift is special version of uniform with maxium window
 // if max_history is 0, then this behaves like the uniform distribution
 
+// provider performance = history über provider schedule failures
+// verhältnis aus success/failures bestimmt performance wert
+
 #[derive(Clone)]
 struct ProviderInfo {
-    /// Number of tasks successfully completed
-    tasks_completed: u64,
-    /// Total duration this provider has been busy
-    total_busy_duration: Duration,
     /// Maximum number of tasks this provider can handle concurrently
-    max_tasks: u32,
+    max_tasks: usize,
     /// Current state of the provider
     state: ProviderStatus,
-    /// Active tasks
-    active_tasks: Vec<(Instant, TaskId)>,
+    /// History
+    history: VecDeque<ScheduleResult>,
 }
 
 impl ProviderInfo {
     fn performance_value(&self) -> f32 {
-        if self.total_busy_duration.is_zero() {
-            0.0
+        if self.history.is_empty() {
+            1.0 // Default performance value when no history exists
         } else {
-            self.tasks_completed as f32 / self.total_busy_duration.as_secs_f32()
+            let successes = self
+                .history
+                .iter()
+                .filter(|&result| matches!(result, ScheduleResult::Success))
+                .count();
+            successes as f32 / self.history.len() as f32
         }
     }
 
-    fn busy(&self) -> bool {
-        self.active_tasks.len() >= self.max_tasks.try_into().unwrap()
+    fn tasks(&self) -> usize {
+        match &self.state {
+            ProviderStatus::Disconnected => 0,
+            ProviderStatus::WaitingForConnection(tasks) => tasks.len(),
+            ProviderStatus::Connected(task_ids) => task_ids.len(),
+        }
+    }
+
+    fn free_capacity(&self) -> bool {
+        self.tasks() < self.max_tasks
     }
 
     fn idle(&self) -> bool {
-        self.active_tasks.is_empty()
-            && !matches!(self.state, ProviderStatus::WaitingForConnection(_))
+        self.tasks() == 0
+    }
+
+    fn connected(&self) -> bool {
+        matches!(self.state, ProviderStatus::Connected(_))
+    }
+
+    fn disconnected(&self) -> bool {
+        matches!(self.state, ProviderStatus::Disconnected)
     }
 }
 
@@ -87,8 +104,8 @@ impl Drift {
     pub fn new(
         increase_threshold: usize,
         decrease_threshold: usize,
-        window_size: usize,
         max_history: usize,
+        connection_pool: usize,
     ) -> Self {
         Drift {
             last_instant: Instant::now(),
@@ -97,65 +114,117 @@ impl Drift {
             event_buffer: VecDeque::new(),
             increase_threshhold: increase_threshold,
             decrease_threshhold: decrease_threshold,
-            window_size,
+            window_size: 0,
             history: VecDeque::new(),
             max_history,
+            max_idle_pool: connection_pool,
         }
     }
 
     fn process_pending_tasks(&mut self) {
-        // cleanup connections
-        for (nanoid, provider_info) in &mut self.providers {
-            if matches!(provider_info.state, ProviderStatus::Connected) && provider_info.idle() {
-                self.event_buffer.push_back(Output::Disconnect(*nanoid));
-                provider_info.state = ProviderStatus::Disconnected;
-            }
-        }
-
-        // update window size from history
+        // Update window size from history
         self.adjust_window_size();
 
-        if self.pending_tasks.is_empty() || self.providers.is_empty() || self.window_size == 0 {
-            return;
-        }
-
-        // get provider
-        let (id, p_info) = Self::get_next_provider(&mut self.providers, self.window_size);
-
-        // schedule task
-        let mut task = self.pending_tasks.pop_front().unwrap();
-        // provider is already connected, task
-        match &mut p_info.state {
-            ProviderStatus::Disconnected => {
-                task.metrics
-                    .push_trace_event_now(EventType::ArtDecoSchedulerProviderConnect, None);
-                self.event_buffer.push_back(Output::Connect(*id));
-                p_info.state = ProviderStatus::WaitingForConnection(vec![task]);
-            }
-            ProviderStatus::Connected => {
-                Self::offload_task(*id, self.last_instant, task, p_info, &mut self.event_buffer);
-            }
-            ProviderStatus::WaitingForConnection(waiting_tasks) => {
-                // Add the new task to the list of waiting tasks
-                waiting_tasks.push(task);
-            }
-        }
-    }
-
-    fn get_next_provider(
-        providers: &mut IndexMap<Nanoid, ProviderInfo>,
-        window_size: usize,
-    ) -> (&Nanoid, &mut ProviderInfo) {
-        // Sort providers by performance value and take the first window_size providers
-        providers.sort_by(|_key1, value1, _key2, value2| {
+        // Sort providers by performance metric (best first)
+        self.providers.sort_by(|_key1, value1, _key2, value2| {
             value2
                 .performance_value()
                 .partial_cmp(&value1.performance_value())
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        let random_index = rand::rng().random_range(0..window_size);
-        providers.get_index_mut(random_index).unwrap()
+        // Always perform connection management regardless of pending tasks
+        let idle_pool = self.maintain_connection_pool();
+
+        self.schedule_next_task(&idle_pool);
+    }
+
+    /// Maintains the connection pool by cleaning up excess connections and establishing
+    /// new connections as needed to maintain the desired idle pool size.
+    fn maintain_connection_pool(&mut self) -> Vec<Nanoid> {
+        let mut idle_pool = Vec::new();
+        let mut disconnected_candidates = Vec::new();
+
+        // Collect current state within the active window
+        for (provider_id, provider_info) in self.providers.iter().take(self.window_size) {
+            if provider_info.connected() && provider_info.free_capacity() {
+                idle_pool.push(*provider_id);
+            } else if provider_info.disconnected() {
+                disconnected_candidates.push(*provider_id);
+            }
+        }
+
+        // Establish new connections with random sampling
+        let connections_needed = self.max_idle_pool.saturating_sub(idle_pool.len());
+        let connections_to_make = connections_needed.min(disconnected_candidates.len());
+
+        let mut rng = rand::rng();
+        for _ in 0..connections_to_make {
+            if disconnected_candidates.is_empty() {
+                break;
+            }
+            let random_index = rng.random_range(0..disconnected_candidates.len());
+            let provider_id = disconnected_candidates.swap_remove(random_index);
+
+            self.event_buffer.push_back(Output::Connect(provider_id));
+            let provider_info = self.providers.get_mut(&provider_id).unwrap();
+            provider_info.state = ProviderStatus::WaitingForConnection(vec![]);
+            idle_pool.push(provider_id);
+        }
+
+        // Cleanup excess idle connections
+        for (idx, (provider_id, provider_info)) in self.providers.iter_mut().enumerate() {
+            let should_disconnect = provider_info.connected()
+                && provider_info.idle()
+                && (idx >= self.window_size || idle_pool.len() > self.max_idle_pool);
+
+            if should_disconnect {
+                self.event_buffer
+                    .push_back(Output::Disconnect(*provider_id));
+                provider_info.state = ProviderStatus::Disconnected;
+            }
+        }
+
+        idle_pool
+    }
+
+    /// Schedules the next pending task to the best available provider.
+    fn schedule_next_task(&mut self, idle_pool: &Vec<Nanoid>) {
+        if self.pending_tasks.is_empty() || self.window_size == 0 {
+            return;
+        }
+
+        // Schedule the next pending task
+        let task = self.pending_tasks.pop_front().unwrap();
+
+        if !idle_pool.is_empty() {
+            let random_index = rand::rng().random_range(0..idle_pool.len());
+            let provider = idle_pool.get(random_index).unwrap();
+            self.schedule_task_to_provider(provider.clone(), task);
+        } else {
+            let random_index = rand::rng().random_range(0..self.window_size);
+            let (provider, _) = self.providers.get_index(random_index).unwrap();
+            self.schedule_task_to_provider(provider.clone(), task);
+        }
+    }
+
+    fn schedule_task_to_provider(&mut self, provider_id: Nanoid, mut task: Task) {
+        if let Some(provider_info) = self.providers.get_mut(&provider_id) {
+            match &mut provider_info.state {
+                ProviderStatus::Disconnected => {
+                    task.metrics
+                        .push_trace_event_now(EventType::ArtDecoSchedulerProviderConnect, None);
+                    self.event_buffer.push_back(Output::Connect(provider_id));
+                    provider_info.state = ProviderStatus::WaitingForConnection(vec![task]);
+                }
+                ProviderStatus::Connected(active_tasks) => {
+                    Self::offload_task(provider_id, task, active_tasks, &mut self.event_buffer);
+                }
+                ProviderStatus::WaitingForConnection(waiting_tasks) => {
+                    waiting_tasks.push(task);
+                }
+            }
+        }
     }
 
     fn adjust_window_size(&mut self) {
@@ -183,23 +252,30 @@ impl Drift {
 
     fn offload_task(
         uuid: Nanoid,
-        last_instant: Instant,
         mut task: Task,
-        provider_info: &mut ProviderInfo,
+        active_tasks: &mut Vec<TaskId>,
         event_buffer: &mut VecDeque<Output>,
     ) {
         task.metrics
             .push_trace_event_now(EventType::ArtDecoSchedulerProviderOffload, None);
-        provider_info.active_tasks.push((last_instant, task.id));
+        active_tasks.push(task.id);
         let schedule_event = Output::Offload(uuid, task);
         event_buffer.push_back(schedule_event);
     }
 
-    fn add_history(&mut self, schedule_result: ScheduleResult) {
-        info!("Add result {} to scheduling history", schedule_result);
-        self.history.push_back(schedule_result);
-        if self.history.len() > self.max_history && self.max_history != 0 {
-            self.history.pop_front();
+    fn add_history(
+        scheduler_history: &mut VecDeque<ScheduleResult>,
+        provider_history: &mut VecDeque<ScheduleResult>,
+        max_history: usize,
+        schedule_result: ScheduleResult,
+    ) {
+        scheduler_history.push_back(schedule_result);
+        provider_history.push_back(schedule_result);
+        if scheduler_history.len() > max_history && max_history != 0 {
+            scheduler_history.pop_front();
+        }
+        if provider_history.len() > max_history && max_history != 0 {
+            provider_history.pop_front();
         }
     }
 }
@@ -212,39 +288,32 @@ impl Default for Drift {
 
 impl Scheduler for Drift {
     fn handle_timeout(&mut self, instant: Instant) {
-        let duration_since_last = instant.saturating_duration_since(self.last_instant);
         self.last_instant = instant;
-
-        // Update busy duration for providers with busy workers
-        self.providers
-            .iter_mut()
-            .filter(|(_, provider_info)| provider_info.busy())
-            .for_each(|(_, provider_info)| {
-                provider_info.total_busy_duration += duration_since_last;
-            });
-
-        self.process_pending_tasks();
     }
 
     fn handle_announce(&mut self, announce: ProviderAnnounce) {
         let provider_id = announce.announce.id;
         let max_concurrency = announce.announce.concurrency;
 
+        let old_len = self.providers.len();
+
         // Update or create provider info
         let provider_info = self
             .providers
             .entry(provider_id)
             .or_insert_with(|| ProviderInfo {
-                tasks_completed: 0,
-                total_busy_duration: Duration::ZERO,
-                max_tasks: max_concurrency,
+                max_tasks: max_concurrency as usize,
                 state: ProviderStatus::Disconnected,
-                active_tasks: vec![],
+                history: VecDeque::new(),
             });
 
-        provider_info.max_tasks = max_concurrency;
+        let old_concurrency = provider_info.max_tasks;
+        provider_info.max_tasks = max_concurrency as usize;
 
-        self.process_pending_tasks();
+        // Only process pending tasks if this is a new provider or max_tasks changed
+        if provider_info.max_tasks != old_concurrency || self.providers.len() != old_len {
+            self.process_pending_tasks();
+        }
     }
 
     fn handle_provider_state(
@@ -260,26 +329,23 @@ impl Scheduler for Drift {
         let current_state =
             std::mem::replace(&mut provider_info.state, ProviderStatus::Disconnected);
         match (provider_state, current_state) {
-            (ProviderState::Connected, ProviderStatus::Connected) => {
+            (ProviderState::Connected, ProviderStatus::Connected(_)) => {
                 unreachable!("provider is already idle but now somehow freshly connected")
             }
             (ProviderState::Disconnected, ProviderStatus::Disconnected) => {
                 trace!("provider is already disconnected")
             }
             (ProviderState::Connected, ProviderStatus::Disconnected) => {
-                provider_info.state = ProviderStatus::Connected;
+                provider_info.state = ProviderStatus::Connected(vec![]);
             }
             (ProviderState::Connected, ProviderStatus::WaitingForConnection(waiting_tasks)) => {
-                provider_info.state = ProviderStatus::Connected;
+                provider_info.state = ProviderStatus::Connected(vec![]);
+                let ProviderStatus::Connected(active_tasks) = &mut provider_info.state else {
+                    unreachable!()
+                };
                 // Offload all waiting tasks
                 for task in waiting_tasks {
-                    Self::offload_task(
-                        uuid,
-                        self.last_instant,
-                        task,
-                        provider_info,
-                        &mut self.event_buffer,
-                    );
+                    Self::offload_task(uuid, task, active_tasks, &mut self.event_buffer);
                 }
             }
             (ProviderState::Disconnected, ProviderStatus::WaitingForConnection(waiting_tasks)) => {
@@ -290,11 +356,9 @@ impl Scheduler for Drift {
                     self.pending_tasks.push_back(task);
                 }
                 provider_info.state = ProviderStatus::Disconnected;
-                provider_info.active_tasks.clear();
             }
-            (ProviderState::Disconnected, ProviderStatus::Connected) => {
+            (ProviderState::Disconnected, ProviderStatus::Connected(_)) => {
                 provider_info.state = ProviderStatus::Disconnected;
-                provider_info.active_tasks.clear();
             }
         }
     }
@@ -304,20 +368,17 @@ impl Scheduler for Drift {
             unreachable!("cant find provider")
         };
 
-        let (start_time, _) = provider_info.active_tasks.remove(
-            provider_info
-                .active_tasks
-                .iter()
-                .position(|(_, task_id)| *task_id == task_result.id)
-                .expect("worker not found"),
-        );
-
-        let task_duration = self.last_instant.saturating_duration_since(start_time);
-        provider_info.total_busy_duration += task_duration;
-
+        if let ProviderStatus::Connected(active_tasks) = &mut provider_info.state {
+            active_tasks.retain(|task_id| *task_id != task_result.id);
+        }
         let result = match task_result.status {
             Status::QoSError(_) => {
-                self.add_history(ScheduleResult::Failure);
+                Self::add_history(
+                    &mut self.history,
+                    &mut provider_info.history,
+                    self.max_history,
+                    ScheduleResult::Failure,
+                );
                 let mut task = task_result.into_task();
                 task.metrics
                     .push_trace_event_now(EventType::ArtDecoSchedulerRequeue, None);
@@ -325,8 +386,12 @@ impl Scheduler for Drift {
                 None
             }
             _ => {
-                provider_info.tasks_completed += 1;
-                self.add_history(ScheduleResult::Success);
+                Self::add_history(
+                    &mut self.history,
+                    &mut provider_info.history,
+                    self.max_history,
+                    ScheduleResult::Success,
+                );
                 Some(task_result)
             }
         };
@@ -363,7 +428,7 @@ mod tests {
         scheduler::{Output, ProviderState, Scheduler},
         task::{Status, Task, TaskExecutable, TaskId, TaskMetrics, TaskResult},
     };
-    use std::time::SystemTime;
+    use std::time::{Duration, SystemTime};
 
     #[test]
     fn test_drift_scheduler_basic_functionality() {
@@ -509,8 +574,7 @@ mod tests {
 
             // Verify that provider performance was tracked
             let provider_info = scheduler.providers.get(&provider_id).unwrap();
-            assert_eq!(provider_info.tasks_completed, 1);
-            assert!(provider_info.total_busy_duration > Duration::ZERO);
+            assert!(!provider_info.history.is_empty()); // Should have history entry
         } else {
             // If no connect event, the test behavior might be different
             // This is acceptable as the scheduler might behave differently
