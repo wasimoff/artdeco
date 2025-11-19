@@ -7,7 +7,7 @@ use crate::{
 use indexmap::IndexMap;
 use nid::Nanoid;
 use rand::Rng;
-use std::{collections::VecDeque, time::Instant};
+use std::{cmp::min, collections::VecDeque, time::Instant};
 use tracing::{info, trace};
 
 #[derive(Clone)]
@@ -32,6 +32,12 @@ impl std::fmt::Display for ScheduleResult {
     }
 }
 
+enum Mode {
+    Drift,
+    Uniform,
+    Greedy,
+}
+
 pub struct Drift {
     last_instant: Instant,
     providers: IndexMap<Nanoid, ProviderInfo>,
@@ -43,6 +49,7 @@ pub struct Drift {
     history: VecDeque<ScheduleResult>,
     max_history: usize,
     max_idle_pool: usize,
+    mode: Mode,
 }
 
 // drift is special version of uniform with maxium window
@@ -97,7 +104,7 @@ impl ProviderInfo {
 }
 
 impl Drift {
-    pub fn new(
+    pub fn new_drift(
         increase_threshold: usize,
         decrease_threshold: usize,
         max_history: usize,
@@ -114,6 +121,39 @@ impl Drift {
             history: VecDeque::new(),
             max_history,
             max_idle_pool: connection_pool,
+            mode: Mode::Drift,
+        }
+    }
+
+    pub fn new_uniform(max_history: usize, connection_pool: usize) -> Self {
+        Drift {
+            last_instant: Instant::now(),
+            providers: IndexMap::new(),
+            pending_tasks: VecDeque::new(),
+            event_buffer: VecDeque::new(),
+            increase_threshhold: 0,
+            decrease_threshhold: 0,
+            window_size: 0,
+            history: VecDeque::new(),
+            max_history,
+            max_idle_pool: connection_pool,
+            mode: Mode::Uniform,
+        }
+    }
+
+    pub fn new_greedy(max_history: usize, connection_pool: usize) -> Self {
+        Drift {
+            last_instant: Instant::now(),
+            providers: IndexMap::new(),
+            pending_tasks: VecDeque::new(),
+            event_buffer: VecDeque::new(),
+            increase_threshhold: 0,
+            decrease_threshhold: 0,
+            window_size: 0,
+            history: VecDeque::new(),
+            max_history,
+            max_idle_pool: connection_pool,
+            mode: Mode::Greedy,
         }
     }
 
@@ -234,19 +274,21 @@ impl Drift {
         // if no history is stored, then the window size cannot be adjusted
         // set it to the current amount of providers and schedule uniformly
         let old_window = self.window_size;
-        if self.max_history == 0 {
-            self.window_size = self.providers.len();
-        } else if self.max_history > 0 {
-            let failures = self
-                .history
-                .iter()
-                .filter(|&result| matches!(result, ScheduleResult::Failure))
-                .count();
-            if failures >= self.increase_threshhold {
-                self.window_size = (self.window_size + 1).min(self.providers.len());
-            } else if failures <= self.decrease_threshhold {
-                self.window_size = self.window_size.saturating_sub(1)
+        match self.mode {
+            Mode::Drift => {
+                let failures = self
+                    .history
+                    .iter()
+                    .filter(|&result| matches!(result, ScheduleResult::Failure))
+                    .count();
+                if failures >= self.increase_threshhold {
+                    self.window_size = (self.window_size + 1).min(self.providers.len());
+                } else if failures <= self.decrease_threshhold {
+                    self.window_size = self.window_size.saturating_sub(1)
+                }
             }
+            Mode::Uniform => self.window_size = self.providers.len(),
+            Mode::Greedy => self.window_size = min(self.providers.len(), 1),
         }
         if old_window != self.window_size {
             info!("Adjusted window size to: {}", self.window_size);
@@ -285,7 +327,7 @@ impl Drift {
 
 impl Default for Drift {
     fn default() -> Self {
-        Self::new(0, 0, 0, 0)
+        Self::new_uniform(0, 0)
     }
 }
 
@@ -435,7 +477,7 @@ mod tests {
 
     #[test]
     fn test_drift_scheduler_basic_functionality() {
-        let mut scheduler = Drift::new(3, 1, 2, 10);
+        let mut scheduler = Drift::new_drift(3, 1, 2, 10);
 
         // Create 3 test providers with different performance characteristics
         let providers = [Nanoid::new(), Nanoid::new(), Nanoid::new()];
@@ -507,7 +549,7 @@ mod tests {
 
     #[test]
     fn test_drift_scheduler_performance_tracking() {
-        let mut scheduler = Drift::new(3, 1, 2, 10);
+        let mut scheduler = Drift::new_drift(3, 1, 2, 10);
         let provider_id = Nanoid::new();
 
         // Announce provider
@@ -586,7 +628,7 @@ mod tests {
 
     #[test]
     fn test_drift_scheduler_window_adjustment() {
-        let mut scheduler = Drift::new(2, 1, 2, 5); // increase_threshold=2, decrease_threshold=1, window_size=2, max_history=5
+        let mut scheduler = Drift::new_drift(2, 1, 2, 5); // increase_threshold=2, decrease_threshold=1, window_size=2, max_history=5
 
         // Create 4 providers
         let providers: Vec<Nanoid> = (0..4).map(|_| Nanoid::new()).collect();
@@ -651,7 +693,7 @@ mod tests {
 
     #[test]
     fn test_drift_scheduler_provider_disconnection() {
-        let mut scheduler = Drift::new(3, 1, 2, 10);
+        let mut scheduler = Drift::new_drift(3, 1, 2, 10);
         let provider_id = Nanoid::new();
 
         // Announce provider
@@ -720,7 +762,7 @@ mod tests {
     #[test]
     fn test_drift_scheduler_uniform_mode() {
         // Test with max_history = 0 (uniform distribution mode)
-        let mut scheduler = Drift::new(0, 0, 3, 0);
+        let mut scheduler = Drift::new_drift(0, 0, 3, 0);
 
         // Create providers
         let providers: Vec<Nanoid> = (0..3).map(|_| Nanoid::new()).collect();
