@@ -39,6 +39,22 @@ struct Args {
     /// Scheduler
     #[arg(value_enum, long, default_value_t = Scheduler::RoundRobin)]
     scheduler: Scheduler,
+
+    /// Drift increase threshold
+    #[arg(long, default_value_t = 5)]
+    drift_increase_threshold: usize,
+
+    /// Drift decrease threshold
+    #[arg(long, default_value_t = 1)]
+    drift_decrease_threshold: usize,
+
+    /// Max history size for Drift/Uniform/Greedy
+    #[arg(long, default_value_t = 100)]
+    max_history: usize,
+
+    /// Connection pool size for Drift/Uniform/Greedy
+    #[arg(long, default_value_t = 0)]
+    connection_pool: usize,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -49,6 +65,10 @@ enum Scheduler {
     RoundRobin,
     /// Uniform Scheduler
     Uniform,
+    /// Drift Scheduler
+    Drift,
+    /// Greedy Scheduler
+    Greedy,
 }
 
 #[tokio::main]
@@ -91,7 +111,30 @@ async fn main() -> Result<()> {
             Scheduler::Uniform => wasimoff_broker(
                 task_receiver,
                 result_sender,
-                Drift::default(),
+                Drift::new_uniform(args.max_history, args.connection_pool),
+                args.broker_url,
+                &binaries,
+            )
+            .await
+            .unwrap(),
+            Scheduler::Drift => wasimoff_broker(
+                task_receiver,
+                result_sender,
+                Drift::new_drift(
+                    args.drift_increase_threshold,
+                    args.drift_decrease_threshold,
+                    args.max_history,
+                    args.connection_pool,
+                ),
+                args.broker_url,
+                &binaries,
+            )
+            .await
+            .unwrap(),
+            Scheduler::Greedy => wasimoff_broker(
+                task_receiver,
+                result_sender,
+                Drift::new_greedy(args.max_history, args.connection_pool),
                 args.broker_url,
                 &binaries,
             )
