@@ -83,7 +83,7 @@ impl ProviderInfo {
         }
     }
 
-    fn free_capacity(&self) -> bool {
+    fn free_workers(&self) -> bool {
         self.tasks() < self.max_tasks
     }
 
@@ -93,10 +93,6 @@ impl ProviderInfo {
 
     fn connected(&self) -> bool {
         matches!(self.state, ProviderStatus::Connected(_))
-    }
-
-    fn disconnected(&self) -> bool {
-        matches!(self.state, ProviderStatus::Disconnected)
     }
 }
 
@@ -142,20 +138,40 @@ impl Drift {
     /// Maintains the connection pool by cleaning up excess connections and establishing
     /// new connections as needed to maintain the desired idle pool size.
     fn maintain_connection_pool(&mut self) -> Vec<Nanoid> {
-        let mut idle_pool = Vec::new();
+        let mut free_pool = Vec::new();
         let mut disconnected_candidates = Vec::new();
 
-        // Collect current state within the active window
-        for (provider_id, provider_info) in self.providers.iter().take(self.window_size) {
-            if provider_info.connected() && provider_info.free_capacity() {
-                idle_pool.push(*provider_id);
-            } else if provider_info.disconnected() {
-                disconnected_candidates.push(*provider_id);
+        for (idx, (provider_id, provider_info)) in self.providers.iter_mut().enumerate() {
+            let in_window = idx < self.window_size;
+            let free_pool_full = free_pool.len() >= self.max_idle_pool;
+            let connected = provider_info.connected();
+            let free_workers = provider_info.free_workers();
+            let idle = provider_info.idle();
+
+            let free = connected && free_workers;
+            let idle = connected && idle;
+
+            if in_window {
+                if !connected {
+                    disconnected_candidates.push(*provider_id);
+                } else if free {
+                    free_pool.push(*provider_id);
+                } else if idle && free_pool_full {
+                    self.event_buffer
+                        .push_back(Output::Disconnect(*provider_id));
+                    provider_info.state = ProviderStatus::Disconnected;
+                }
+            } else {
+                if idle {
+                    self.event_buffer
+                        .push_back(Output::Disconnect(*provider_id));
+                    provider_info.state = ProviderStatus::Disconnected;
+                }
             }
         }
 
         // Establish new connections with random sampling
-        let connections_needed = self.max_idle_pool.saturating_sub(idle_pool.len());
+        let connections_needed = self.max_idle_pool.saturating_sub(free_pool.len());
         let connections_to_make = connections_needed.min(disconnected_candidates.len());
 
         let mut rng = rand::rng();
@@ -169,23 +185,10 @@ impl Drift {
             self.event_buffer.push_back(Output::Connect(provider_id));
             let provider_info = self.providers.get_mut(&provider_id).unwrap();
             provider_info.state = ProviderStatus::WaitingForConnection(vec![]);
-            idle_pool.push(provider_id);
+            free_pool.push(provider_id);
         }
 
-        // Cleanup excess idle connections
-        for (idx, (provider_id, provider_info)) in self.providers.iter_mut().enumerate() {
-            let should_disconnect = provider_info.connected()
-                && provider_info.idle()
-                && (idx >= self.window_size || idle_pool.len() > self.max_idle_pool);
-
-            if should_disconnect {
-                self.event_buffer
-                    .push_back(Output::Disconnect(*provider_id));
-                provider_info.state = ProviderStatus::Disconnected;
-            }
-        }
-
-        idle_pool
+        free_pool
     }
 
     /// Schedules the next pending task to the best available provider.
