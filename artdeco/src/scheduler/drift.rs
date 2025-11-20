@@ -60,8 +60,6 @@ pub struct Drift {
 
 #[derive(Clone)]
 struct ProviderInfo {
-    /// Maximum number of tasks this provider can handle concurrently
-    max_tasks: usize,
     /// Current state of the provider
     state: ProviderStatus,
     /// History
@@ -88,10 +86,6 @@ impl ProviderInfo {
             ProviderStatus::WaitingForConnection(tasks) => tasks.len(),
             ProviderStatus::Connected(task_ids) => task_ids.len(),
         }
-    }
-
-    fn free_workers(&self) -> bool {
-        self.tasks() < self.max_tasks
     }
 
     fn idle(&self) -> bool {
@@ -178,40 +172,37 @@ impl Drift {
     /// Maintains the connection pool by cleaning up excess connections and establishing
     /// new connections as needed to maintain the desired idle pool size.
     fn maintain_connection_pool(&mut self) -> Vec<Nanoid> {
-        let mut free_pool = Vec::new();
+        let mut idle_pool = Vec::new();
         let mut disconnected_candidates = Vec::new();
 
         for (idx, (provider_id, provider_info)) in self.providers.iter_mut().enumerate() {
             let in_window = idx < self.window_size;
-            let free_pool_full = free_pool.len() >= self.max_idle_pool;
+            let idle_pool_full = idle_pool.len() >= self.max_idle_pool;
             let connected = provider_info.connected();
-            let free_workers = provider_info.free_workers();
             let idle = provider_info.idle();
-
-            let free = connected && free_workers;
             let idle = connected && idle;
 
             if in_window {
                 if !connected {
                     disconnected_candidates.push(*provider_id);
-                } else if free {
-                    free_pool.push(*provider_id);
-                } else if idle && free_pool_full {
-                    self.event_buffer
-                        .push_back(Output::Disconnect(*provider_id));
-                    provider_info.state = ProviderStatus::Disconnected;
+                } else if idle {
+                    if idle_pool_full {
+                        self.event_buffer
+                            .push_back(Output::Disconnect(*provider_id));
+                        provider_info.state = ProviderStatus::Disconnected;
+                    } else {
+                        idle_pool.push(*provider_id);
+                    }
                 }
-            } else {
-                if idle {
-                    self.event_buffer
-                        .push_back(Output::Disconnect(*provider_id));
-                    provider_info.state = ProviderStatus::Disconnected;
-                }
+            } else if idle {
+                self.event_buffer
+                    .push_back(Output::Disconnect(*provider_id));
+                provider_info.state = ProviderStatus::Disconnected;
             }
         }
 
         // Establish new connections with random sampling
-        let connections_needed = self.max_idle_pool.saturating_sub(free_pool.len());
+        let connections_needed = self.max_idle_pool.saturating_sub(idle_pool.len());
         let connections_to_make = connections_needed.min(disconnected_candidates.len());
 
         let mut rng = rand::rng();
@@ -225,14 +216,14 @@ impl Drift {
             self.event_buffer.push_back(Output::Connect(provider_id));
             let provider_info = self.providers.get_mut(&provider_id).unwrap();
             provider_info.state = ProviderStatus::WaitingForConnection(vec![]);
-            free_pool.push(provider_id);
+            idle_pool.push(provider_id);
         }
 
-        free_pool
+        idle_pool
     }
 
     /// Schedules the next pending task to the best available provider.
-    fn schedule_next_task(&mut self, idle_pool: &Vec<Nanoid>) {
+    fn schedule_next_task(&mut self, idle_pool: &[Nanoid]) {
         if self.pending_tasks.is_empty() || self.window_size == 0 {
             return;
         }
@@ -243,11 +234,11 @@ impl Drift {
         if !idle_pool.is_empty() {
             let random_index = rand::rng().random_range(0..idle_pool.len());
             let provider = idle_pool.get(random_index).unwrap();
-            self.schedule_task_to_provider(provider.clone(), task);
+            self.schedule_task_to_provider(*provider, task);
         } else {
             let random_index = rand::rng().random_range(0..self.window_size);
             let (provider, _) = self.providers.get_index(random_index).unwrap();
-            self.schedule_task_to_provider(provider.clone(), task);
+            self.schedule_task_to_provider(*provider, task);
         }
     }
 
@@ -338,25 +329,19 @@ impl Scheduler for Drift {
 
     fn handle_announce(&mut self, announce: ProviderAnnounce) {
         let provider_id = announce.announce.id;
-        let max_concurrency = announce.announce.concurrency;
 
         let old_len = self.providers.len();
 
         // Update or create provider info
-        let provider_info = self
-            .providers
+        self.providers
             .entry(provider_id)
             .or_insert_with(|| ProviderInfo {
-                max_tasks: max_concurrency as usize,
                 state: ProviderStatus::Disconnected,
                 history: VecDeque::new(),
             });
 
-        let old_concurrency = provider_info.max_tasks;
-        provider_info.max_tasks = max_concurrency as usize;
-
-        // Only process pending tasks if this is a new provider or max_tasks changed
-        if provider_info.max_tasks != old_concurrency || self.providers.len() != old_len {
+        // Only process pending tasks if this is a new provider
+        if self.providers.len() != old_len {
             self.process_pending_tasks();
         }
     }
