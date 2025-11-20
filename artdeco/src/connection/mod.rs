@@ -259,7 +259,19 @@ impl RtcConnectionManager {
                 }
             }
             InputInner::Disconnect(nanoid) => {
-                self.rtc_connections.remove(&nanoid);
+                if let Some(mut connection) = self.rtc_connections.remove(&nanoid) {
+                    connection.send_data(&[]);
+                    for _ in 0..20 {
+                        match connection.poll_output() {
+                            rtc_connection::Output::RtcTransmit(transmit) => {
+                                self.output_buffer
+                                    .push_back(Output::UdpTransmit(transmit.into()));
+                            }
+                            rtc_connection::Output::Timeout(_) => break,
+                            _ => {}
+                        }
+                    }
+                }
                 self.output_buffer.push_back(Output::ChannelClosed(nanoid));
             }
         }
