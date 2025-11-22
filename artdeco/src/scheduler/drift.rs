@@ -92,8 +92,8 @@ impl ProviderInfo {
         self.tasks() == 0
     }
 
-    fn connected(&self) -> bool {
-        matches!(self.state, ProviderStatus::Connected(_))
+    fn disconnected(&self) -> bool {
+        matches!(self.state, ProviderStatus::Disconnected)
     }
 }
 
@@ -178,12 +178,11 @@ impl Drift {
         for (idx, (provider_id, provider_info)) in self.providers.iter_mut().enumerate() {
             let in_window = idx < self.window_size;
             let idle_pool_full = idle_pool.len() >= self.max_idle_pool;
-            let connected = provider_info.connected();
+            let disconnected = provider_info.disconnected();
             let idle = provider_info.idle();
-            let idle = connected && idle;
 
             if in_window {
-                if !connected {
+                if disconnected {
                     disconnected_candidates.push(*provider_id);
                 } else if idle {
                     if idle_pool_full {
