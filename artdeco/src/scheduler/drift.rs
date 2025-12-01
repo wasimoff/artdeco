@@ -46,7 +46,6 @@ pub struct Drift {
     increase_threshhold: usize,
     decrease_threshhold: usize,
     window_size: usize,
-    history: VecDeque<ScheduleResult>,
     max_history: usize,
     max_idle_pool: usize,
     mode: Mode,
@@ -112,7 +111,6 @@ impl Drift {
             increase_threshhold: increase_threshold,
             decrease_threshhold: decrease_threshold,
             window_size: 0,
-            history: VecDeque::new(),
             max_history,
             max_idle_pool: connection_pool,
             mode: Mode::Drift,
@@ -128,7 +126,6 @@ impl Drift {
             increase_threshhold: 0,
             decrease_threshhold: 0,
             window_size: 0,
-            history: VecDeque::new(),
             max_history,
             max_idle_pool: connection_pool,
             mode: Mode::Uniform,
@@ -144,7 +141,6 @@ impl Drift {
             increase_threshhold: 0,
             decrease_threshhold: 0,
             window_size: 0,
-            history: VecDeque::new(),
             max_history,
             max_idle_pool: connection_pool,
             mode: Mode::Greedy,
@@ -261,15 +257,15 @@ impl Drift {
     }
 
     fn adjust_window_size(&mut self) {
-        // if no history is stored, then the window size cannot be adjusted
-        // set it to the current amount of providers and schedule uniformly
         let old_window = self.window_size;
         match self.mode {
             Mode::Drift => {
                 let failures = self
-                    .history
-                    .iter()
-                    .filter(|&result| matches!(result, ScheduleResult::Failure))
+                    .providers
+                    .values()
+                    .take(self.window_size)
+                    .flat_map(|p| &p.history)
+                    .filter(|result| matches!(result, ScheduleResult::Failure))
                     .count();
                 if failures >= self.increase_threshhold {
                     self.window_size = (self.window_size + 1).min(self.providers.len());
@@ -299,16 +295,11 @@ impl Drift {
     }
 
     fn add_history(
-        scheduler_history: &mut VecDeque<ScheduleResult>,
         provider_history: &mut VecDeque<ScheduleResult>,
         max_history: usize,
         schedule_result: ScheduleResult,
     ) {
-        scheduler_history.push_back(schedule_result);
         provider_history.push_back(schedule_result);
-        if scheduler_history.len() > max_history && max_history != 0 {
-            scheduler_history.pop_front();
-        }
         if provider_history.len() > max_history && max_history != 0 {
             provider_history.pop_front();
         }
@@ -403,7 +394,6 @@ impl Scheduler for Drift {
         let result = match task_result.status {
             Status::QoSError(_) => {
                 Self::add_history(
-                    &mut self.history,
                     &mut provider_info.history,
                     self.max_history,
                     ScheduleResult::Failure,
@@ -416,7 +406,6 @@ impl Scheduler for Drift {
             }
             _ => {
                 Self::add_history(
-                    &mut self.history,
                     &mut provider_info.history,
                     self.max_history,
                     ScheduleResult::Success,
