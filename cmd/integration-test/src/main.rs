@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
     drop(sender); // drop sender so the daemon stops after offloading all tasks
 
     // Create a scheduler
-    let scheduler = Drift::default();
+    let scheduler = Drift::new_drift(10, 5, 20, 1);
     //let receiver_stream = ReceiverStream::new(receiver);
     let args: Vec<String> = std::env::args().collect();
     let binding = "nats".to_string();

@@ -270,7 +270,10 @@ impl Drift {
                 if failures >= self.increase_threshhold {
                     self.window_size = (self.window_size + 1).min(self.providers.len());
                 } else if failures <= self.decrease_threshhold {
-                    self.window_size = self.window_size.saturating_sub(1).min(1)
+                    self.window_size = min(
+                        self.providers.len(),
+                        self.window_size.saturating_sub(1).max(1),
+                    )
                 }
             }
             Mode::Uniform => self.window_size = self.providers.len(),
