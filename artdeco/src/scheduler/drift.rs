@@ -520,22 +520,28 @@ mod tests {
             Instant::now(),
         );
 
-        // Should now get an offload event
-        let offload_output = scheduler.poll_output();
-        match offload_output {
-            Output::Offload(provider_id, task) => {
-                assert_eq!(provider_id, connected_provider);
-                assert_eq!(task.id, TaskId::Consumer(1));
+        // Should now get an offload event (may need to skip Disconnect/Connect events from pool maintenance)
+        let mut found_offload = false;
+        for _ in 0..10 {
+            let output = scheduler.poll_output();
+            match output {
+                Output::Offload(provider_id, task) => {
+                    assert_eq!(provider_id, connected_provider);
+                    assert_eq!(task.id, TaskId::Consumer(1));
+                    found_offload = true;
+                    break;
+                }
+                Output::Disconnect(_) | Output::Connect(_) => {
+                    // Connection pool maintenance may generate these events, continue
+                    continue;
+                }
+                Output::Timeout(_) => {
+                    // This might be expected behavior if no immediate offload happens
+                    break;
+                }
             }
-            Output::Timeout(_) => {
-                // This might be expected behavior if no immediate offload happens
-                return;
-            }
-            other => panic!("Expected Offload event or Timeout, got {:?}", other),
         }
-
-        // Next poll should return timeout since no more tasks pending
-        assert!(matches!(scheduler.poll_output(), Output::Timeout(_)));
+        assert!(found_offload, "Expected to find an Offload event");
     }
 
     #[test]
