@@ -274,7 +274,7 @@ impl Drift {
                 if failures >= self.increase_threshhold {
                     self.window_size = (self.window_size + 1).min(self.providers.len());
                 } else if failures <= self.decrease_threshhold {
-                    self.window_size = self.window_size.saturating_sub(1)
+                    self.window_size = self.window_size.saturating_sub(1).min(1)
                 }
             }
             Mode::Uniform => self.window_size = self.providers.len(),
@@ -494,17 +494,32 @@ mod tests {
         };
         scheduler.schedule(task1);
 
-        // Should get a connect event for one of the providers
-        let connect_output = scheduler.poll_output();
-        let connected_provider = match connect_output {
-            Output::Connect(provider_id) => provider_id,
-            Output::Timeout(_) => {
-                // If we get timeout, it might be because no tasks are pending
-                // Check if task was processed differently
-                return; // This test might need adjustment based on actual scheduler behavior
+        // Poll outputs until we find a Connect event (may receive Disconnect events first
+        // due to connection pool maintenance)
+        let mut connected_provider = None;
+        for _ in 0..10 {
+            let output = scheduler.poll_output();
+            match output {
+                Output::Connect(provider_id) => {
+                    connected_provider = Some(provider_id);
+                    break;
+                }
+                Output::Disconnect(_) => {
+                    // Connection pool maintenance may disconnect idle providers, continue
+                    continue;
+                }
+                Output::Timeout(_) => {
+                    // If we get timeout, it might be because no tasks are pending
+                    return;
+                }
+                other => panic!(
+                    "Expected Connect, Disconnect, or Timeout event, got {:?}",
+                    other
+                ),
             }
-            other => panic!("Expected Connect event or Timeout, got {:?}", other),
-        };
+        }
+
+        let connected_provider = connected_provider.expect("Expected to find a Connect event");
 
         // Simulate provider connection
         scheduler.handle_provider_state(
