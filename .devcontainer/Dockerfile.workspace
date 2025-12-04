@@ -5,6 +5,5 @@ FROM ghcr.io/wasimoff/tracebench:latest AS tracebench
 FROM mcr.microsoft.com/devcontainers/base:bullseye
 
 # Copy /dataset and /tracebench from the tracebench image
-COPY --from=tracebench /dataset /dataset
 COPY --from=tracebench /tracebench /tracebench
 COPY --from=tracebench /wasm/argonload.wasm /wasm/
